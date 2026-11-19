@@ -45,6 +45,10 @@ class ConfigFormat(ABC):
             File extension including dot (e.g., '.toml')
         """
 
+    def get_extensions(self) -> tuple[str, ...]:
+        """Get all extensions accepted for this format."""
+        return (self.get_extension(),)
+
     @classmethod
     @abstractmethod
     def detect(cls, data: str) -> bool:

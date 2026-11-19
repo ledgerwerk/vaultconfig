@@ -22,15 +22,21 @@ author = "Holger Nahrstaedt"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "myst_parser",
     "sphinx.ext.autodoc",
+    "sphinx_autodoc_typehints",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
 ]
 
+source_suffix = {".md": "markdown"}
+
+myst_enable_extensions = ["colon_fence", "deflist", "fieldlist"]
+
 # Napoleon settings for NumPy-style docstrings
-napoleon_google_docstring = False
+napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False

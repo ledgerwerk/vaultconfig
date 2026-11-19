@@ -1,19 +1,15 @@
-# Project-local archledger configuration.
-# This file lives in the source project root.
-config_version = 7
-archledger_dir = ".archledger"
+# Stable Archledger configuration.
+# Paths are resolved from the project root and canonical data mount.
+config_version = 12
 
-# Stable project identity. Commit this with your source tree.
-project_uuid = "ccf3ed60-2092-41bb-95dd-b1bab1b30af3"
-project_name = "vaultconfig"
+[ledger]
+code = "al"
 
 [ids]
-prefix = "al"
 width = 4
-segment_mode = "none"
-default_segment = "content"
 
-[ids.segment_map]
+[ids.kind_map]
+acceptance_criterion = "ac"
 adr = "adr"
 archive_tombstone = "archive"
 black_box = "block"
@@ -40,14 +36,13 @@ format = "markdown"
 front_matter = "yaml"
 section_extension = ".md"
 record_extension = ".md"
-schema_version = 2
+schema_version = 4
 
 [build]
-default_output = "ARCHITECTURE.md"
+default_output = "architecture.md"
 default_format = "markdown"
-# [build].default_output_dir is relative to the directory containing
-# archledger.toml or .archledger.toml.
-default_output_dir = "."
+# [build].default_output_dir is relative to the project root.
+default_output_dir = "docs"
 include_draft = false
 include_superseded = false
 strict = false
@@ -55,6 +50,19 @@ keep_intermediate = false
 converter = "auto"
 pdf_engine = ""
 reference_docx = ""
+
+[profiles]
+enabled = [
+  "arc42",
+]
+default = "arc42"
+
+[profiles.arc42]
+kind = "documentation"
+template = "arc42"
+sections_dir = "profiles/arc42/sections"
+build_template = "arc42_document"
+include_help = false
 
 [diagrams]
 enabled = false
@@ -101,6 +109,7 @@ exclude = [
   ".ruff_cache/**",
   "dist/**",
   "build/**",
+  ".ledger/**",
 ]
 max_file_bytes = 1000000
 hash_algorithm = "sha256"

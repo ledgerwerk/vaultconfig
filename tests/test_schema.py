@@ -112,6 +112,34 @@ def test_get_defaults():
     assert "required_field" not in defaults
 
 
+def test_get_sensitive_fields_recurses_through_typing_wrappers():
+    from typing import Annotated
+
+    class Credentials(BaseModel):
+        password: str = Field(json_schema_extra={"sensitive": True})
+
+    class AppConfig(BaseModel):
+        optional: Credentials | None = None
+        annotated: Annotated[Credentials, "metadata"]
+        children: list[Credentials]
+        mapping: dict[str, Credentials]
+
+    schema = ConfigSchema(AppConfig)
+    assert schema.get_sensitive_fields() == {
+        "optional.password",
+        "annotated.password",
+        "children.*.password",
+        "mapping.*.password",
+    }
+
+
+def test_get_defaults_includes_explicit_none():
+    class ModelWithNoneDefault(BaseModel):
+        value: str | None = None
+
+    assert ConfigSchema(ModelWithNoneDefault).get_defaults() == {"value": None}
+
+
 def test_get_defaults_empty():
     """Test getting defaults when none exist."""
     schema = ConfigSchema(ModelWithSensitive)

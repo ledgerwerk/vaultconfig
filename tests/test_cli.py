@@ -41,24 +41,25 @@ def test_cli_init_with_format(cli_runner, temp_dir):
     assert "Format: ini" in result.output
 
 
-def test_cli_init_with_encryption(cli_runner, temp_dir):
-    """Test init command with encryption."""
+def test_cli_init_does_not_claim_persistent_encryption(cli_runner, temp_dir):
     config_dir = temp_dir / "test_config"
-    result = cli_runner.invoke(
-        main, ["init", "-d", str(config_dir), "-e"], input="password123\npassword123\n"
-    )
+    result = cli_runner.invoke(main, ["init", "-d", str(config_dir)])
     assert result.exit_code == 0
-    assert "Encrypted: Yes" in result.output
+    assert "Encrypted: Yes" not in result.output
 
-
-def test_cli_init_password_mismatch(cli_runner, temp_dir):
-    """Test init with mismatched passwords."""
-    config_dir = temp_dir / "test_config"
-    result = cli_runner.invoke(
-        main, ["init", "-d", str(config_dir), "-e"], input="password123\nwrong\n"
+    manager = ConfigManager(config_dir)
+    manager.add_config("database", {"password": "secret"}, obscure_passwords=False)
+    assert (
+        not (config_dir / "database.toml")
+        .read_bytes()
+        .startswith(b"VAULTCONFIG_ENCRYPT_V1:")
     )
-    assert result.exit_code == 1
-    assert "do not match" in result.output
+
+    encrypted_dir = temp_dir / "encrypted_config"
+    result = cli_runner.invoke(main, ["init", "-d", str(encrypted_dir), "--encrypt"])
+    assert result.exit_code == 2
+    assert "Encrypted: Yes" not in result.output
+    assert not encrypted_dir.exists()
 
 
 def test_cli_init_existing_directory(cli_runner, config_dir):
@@ -1129,5 +1130,183 @@ def test_cli_export_env_with_include_and_exclude(cli_runner, config_dir):
 
 
 def test_docs_do_not_reference_old_encryption_header():
-    """Ensure docs/api.rst does not reference the old V0 encryption header."""
-    assert "VAULTCONFIG_ENCRYPT_V0" not in Path("docs/api.rst").read_text()
+    """Ensure docs/api.md does not reference the old V0 encryption header."""
+    assert "VAULTCONFIG_ENCRYPT_V0" not in Path("docs/api.md").read_text()
+
+
+def _write_encrypted_cli_config(config_dir, name):
+    writer = ConfigManager(config_dir, password="original-password")
+    writer.add_config(name, {"key": "original"}, obscure_passwords=False)
+    return (config_dir / f"{name}.toml").read_bytes()
+
+
+@pytest.mark.parametrize("command", ["create", "set", "import", "copy", "rename"])
+def test_unreadable_config_files_are_not_overwritten(
+    cli_runner, config_dir, tmp_path, monkeypatch, command
+):
+    monkeypatch.setenv("VAULTCONFIG_PASSWORD", "wrong-password")
+    if command in {"copy", "rename"}:
+        ConfigManager(config_dir).add_config(
+            "source", {"key": "source"}, obscure_passwords=False
+        )
+    target = config_dir / "victim.toml"
+    original = _write_encrypted_cli_config(config_dir, "victim")
+
+    if command == "create":
+        args = ["create", "victim", "-C", str(config_dir), "--no-interactive"]
+    elif command == "set":
+        args = ["set", "victim", "key=replacement", "-d", str(config_dir), "--create"]
+    elif command == "import":
+        source = tmp_path / "import.json"
+        source.write_text('{"key":"replacement"}', encoding="utf-8")
+        args = ["import", "victim", "-C", str(config_dir), "--from-file", str(source)]
+    elif command == "copy":
+        args = ["copy", "source", "victim", "-C", str(config_dir)]
+    else:
+        args = ["rename", "source", "victim", "-C", str(config_dir)]
+
+    result = cli_runner.invoke(main, args)
+    assert result.exit_code != 0
+    assert target.read_bytes() == original
+    if command in {"copy", "rename"}:
+        assert (config_dir / "source.toml").exists()
+
+
+def test_import_can_replace_unreadable_config_with_explicit_overwrite(
+    cli_runner, config_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("VAULTCONFIG_PASSWORD", "wrong-password")
+    target = config_dir / "victim.toml"
+    _write_encrypted_cli_config(config_dir, "victim")
+    source = tmp_path / "import.json"
+    source.write_text('{"key":"replacement"}', encoding="utf-8")
+
+    result = cli_runner.invoke(
+        main,
+        [
+            "import",
+            "victim",
+            "-C",
+            str(config_dir),
+            "--from-file",
+            str(source),
+            "--overwrite",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert target.read_bytes().startswith(b"VAULTCONFIG_ENCRYPT_V1:")
+    overwritten = ConfigManager(config_dir, password="wrong-password")
+    assert overwritten.get_config("victim").get("key") == "replacement"
+
+
+@pytest.mark.parametrize("key", ["not-hex", "ab" * 31])
+def test_invalid_explicit_custom_cipher_key_fails_closed(
+    cli_runner, config_dir, monkeypatch, key
+):
+    monkeypatch.setenv("VAULTCONFIG_CIPHER_KEY", key)
+    result = cli_runner.invoke(main, ["list", "-d", str(config_dir)])
+    assert result.exit_code == 1
+    assert "Invalid custom cipher key" in result.output
+
+
+def test_unreadable_custom_cipher_key_file_fails_closed(
+    cli_runner, config_dir, monkeypatch
+):
+    monkeypatch.setenv("VAULTCONFIG_CIPHER_KEY", "ab" * 32)
+    monkeypatch.setenv("VAULTCONFIG_CIPHER_KEY_FILE", str(config_dir / "missing-key"))
+
+    result = cli_runner.invoke(main, ["list", "-d", str(config_dir)])
+
+    assert result.exit_code == 1
+    assert "Could not read VAULTCONFIG_CIPHER_KEY_FILE" in result.output
+
+
+def test_custom_cipher_key_file_takes_precedence_over_environment(
+    config_dir, tmp_path, monkeypatch
+):
+    from vaultconfig.cli import _get_manager
+
+    file_key = "01" * 32
+    key_file = tmp_path / "cipher-key"
+    key_file.write_text(file_key, encoding="utf-8")
+    monkeypatch.setenv("VAULTCONFIG_CIPHER_KEY", "02" * 32)
+    monkeypatch.setenv("VAULTCONFIG_CIPHER_KEY_FILE", str(key_file))
+
+    manager = _get_manager(str(config_dir), format="toml", auto_load=False)
+
+    assert manager._obscurer._cipher_key == bytes.fromhex(file_key)
+
+
+@pytest.mark.parametrize(
+    ("option", "key_name"),
+    [("--uppercase", "DATABASE_HOST_NAME"), ("--no-uppercase", "database_host_name")],
+)
+def test_cli_run_uppercase_boolean_pair(
+    cli_runner, config_dir, tmp_path, monkeypatch, option, key_name
+):
+    import json
+    import sys
+
+    monkeypatch.delenv("DATABASE_HOST_NAME", raising=False)
+    monkeypatch.delenv("database_host_name", raising=False)
+    ConfigManager(config_dir).add_config(
+        "test", {"database": {"host-name": 123}}, obscure_passwords=False
+    )
+    output = tmp_path / "env.json"
+    script = tmp_path / "print_env.py"
+    script.write_text(
+        "import json, os\n"
+        "data = {\n"
+        "    'upper': os.getenv('DATABASE_HOST_NAME'),\n"
+        "    'lower': os.getenv('database_host_name'),\n"
+        "}\n"
+        f"with open({str(output)!r}, 'w') as stream:\n"
+        "    json.dump(data, stream)\n",
+        encoding="utf-8",
+    )
+
+    result = cli_runner.invoke(
+        main,
+        ["run", "test", "-d", str(config_dir), option, sys.executable, str(script)],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "upper": "123" if key_name == "DATABASE_HOST_NAME" else None,
+        "lower": "123" if key_name == "database_host_name" else None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("option", "expected"),
+    [
+        ("--uppercase", "export DATABASE_HOST_NAME='123'"),
+        ("--no-uppercase", "export database_host_name='123'"),
+    ],
+)
+def test_cli_export_env_uppercase_boolean_pair(
+    cli_runner, config_dir, option, expected
+):
+    ConfigManager(config_dir).add_config(
+        "test", {"database": {"host-name": 123}}, obscure_passwords=False
+    )
+
+    result = cli_runner.invoke(
+        main,
+        ["export-env", "test", "-C", str(config_dir), option, "--shell", "bash"],
+    )
+
+    assert result.exit_code == 0
+    assert expected in result.output
+
+
+def test_format_autodetection_rejects_mixed_directories(tmp_path):
+    from vaultconfig.cli import _detect_format
+    from vaultconfig.exceptions import FormatError
+
+    (tmp_path / "database.toml").write_text('host = "localhost"', encoding="utf-8")
+    (tmp_path / "secrets.yml").write_text("password: secret", encoding="utf-8")
+
+    with pytest.raises(FormatError, match="Mixed config formats"):
+        _detect_format(tmp_path)

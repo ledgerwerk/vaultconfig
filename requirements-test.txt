@@ -1,11 +1,2 @@
-pip
-setuptools
-wheel
-flake8
-nose
-pytest
-pytest-cov
-coverage
-tox
-wsgidav
-cheroot
+# Contributor and test dependencies are maintained in pyproject.toml.
+-e .[dev]

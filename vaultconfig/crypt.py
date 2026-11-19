@@ -53,6 +53,8 @@ ENV_PASSWORD: Final[str] = "VAULTCONFIG_PASSWORD"
 ENV_PASSWORD_COMMAND: Final[str] = "VAULTCONFIG_PASSWORD_COMMAND"
 ENV_PASSWORD_CHANGE: Final[str] = "VAULTCONFIG_PASSWORD_CHANGE"
 
+PASSWORD_COMMAND_TIMEOUT_SECONDS: Final[int] = 30
+
 
 def _check_nacl_available() -> None:
     """Check if PyNaCl is available.
@@ -193,13 +195,15 @@ def decrypt(data: bytes, password: str | None = None) -> bytes:
         # Get encrypted data (everything after header)
         if len(lines) < 2:
             raise DecryptionError("No encrypted data found after header")
+        if len(lines) > 2:
+            raise DecryptionError("Unexpected extra data after encrypted payload")
 
         encrypted_b64 = lines[1]
 
         # Decode base64
         try:
-            encrypted_data = base64.b64decode(encrypted_b64)
-        except Exception as e:
+            encrypted_data = base64.b64decode(encrypted_b64, validate=True)
+        except ValueError as e:
             raise DecryptionError(f"Invalid base64 encoding: {e}") from e
 
         # Extract salt
@@ -250,6 +254,24 @@ def is_encrypted(data: bytes) -> bool:
         return False
 
 
+def _split_password_command(
+    password_command: str, windows: bool | None = None
+) -> list[str]:
+    if windows is None:
+        windows = os.name == "nt"
+    arguments = shlex.split(password_command, posix=not windows)
+    if windows:
+        arguments = [
+            argument[1:-1]
+            if len(argument) >= 2
+            and argument.startswith('"')
+            and argument.endswith('"')
+            else argument
+            for argument in arguments
+        ]
+    return arguments
+
+
 def get_password(prompt: str = "Config password: ", changing: bool = False) -> str:
     """Get password from various sources.
 
@@ -281,25 +303,24 @@ def get_password(prompt: str = "Config password: ", changing: bool = False) -> s
             if changing:
                 env[ENV_PASSWORD_CHANGE] = "1"
 
-            # SECURITY: Use shlex.split() to safely parse command
-            # This prevents shell injection while still allowing complex commands
-            # Note: Use posix=True on all platforms because:
-            # - It properly handles quoted arguments and strips quotes
-            # - Works correctly with subprocess.run(..., shell=False)
-            # - Handles both Windows and Unix paths when properly quoted
-            cmd_args = shlex.split(password_cmd, posix=True)
-
+            cmd_args = _split_password_command(password_cmd)
             result = subprocess.run(
                 cmd_args,
-                shell=False,  # SECURITY: Never use shell=True with user input
+                shell=False,
                 capture_output=True,
                 text=True,
                 check=True,
                 env=env,
+                timeout=PASSWORD_COMMAND_TIMEOUT_SECONDS,
             )
             password = result.stdout.strip()
             if password:
                 return password
+        except subprocess.TimeoutExpired as e:
+            raise ValueError(
+                f"Password command timed out after "
+                f"{PASSWORD_COMMAND_TIMEOUT_SECONDS} seconds"
+            ) from e
         except subprocess.CalledProcessError as e:
             raise ValueError(f"Password command failed: {e}") from e
         except ValueError as e:

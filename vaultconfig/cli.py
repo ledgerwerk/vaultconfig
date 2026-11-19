@@ -15,13 +15,19 @@ from rich.table import Table
 from vaultconfig._version import __version__
 from vaultconfig.config import ConfigManager
 from vaultconfig.env_export import (
+    build_env_vars,
     detect_shell,
     filter_dict,
     flatten_dict,
     format_env_export,
     format_nushell_load_env,
 )
-from vaultconfig.exceptions import VaultConfigError
+from vaultconfig.exceptions import FormatError, VaultConfigError
+from vaultconfig.formats import (
+    get_format_extensions,
+    get_format_handler,
+    supported_formats,
+)
 from vaultconfig.io import dump_mapping, load_mapping_file
 
 console = Console()
@@ -87,8 +93,7 @@ def main() -> None:
     help="Config directory (uses default if not specified)",
 )
 @click.option("--format", "-f", default="toml", help="Config format (toml/ini/yaml)")
-@click.option("--encrypt", "-e", is_flag=True, help="Enable encryption")
-def init(config_dir: str | None, format: str, encrypt: bool) -> None:
+def init(config_dir: str | None, format: str) -> None:
     """Initialize a new config directory.
 
     If no directory is specified, uses the default config directory:
@@ -109,20 +114,11 @@ def init(config_dir: str | None, format: str, encrypt: bool) -> None:
 
     config_path.mkdir(parents=True, exist_ok=True)
 
-    password = None
-    if encrypt:
-        password = click.prompt("Enter encryption password", hide_input=True)
-        confirm = click.prompt("Confirm password", hide_input=True)
-        if password != confirm:
-            console.print("[red]Error:[/red] Passwords do not match")
-            sys.exit(1)
-
     # Initialize the ConfigManager to create the directory structure
-    ConfigManager(config_path, format=format, password=password)
+    ConfigManager(config_path, format=format)
 
     console.print(f"[green]✓[/green] Initialized config directory: {config_path}")
     console.print(f"  Format: {format}")
-    console.print(f"  Encrypted: {'Yes' if encrypt else 'No'}")
 
 
 @main.command(name="list")
@@ -940,7 +936,7 @@ def import_command(
         config_data = load_mapping_file(file_path, import_format)
 
         # Add configuration
-        manager.add_config(name, config_data)
+        manager.add_config(name, config_data, overwrite=overwrite)
         console.print(f"[green]✓[/green] Imported config: {name}")
 
     except VaultConfigError as e:
@@ -963,7 +959,10 @@ def import_command(
 @click.option("--prefix", "-p", default="", help="Environment variable prefix")
 @click.option("--reveal", "-r", is_flag=True, help="Reveal obscured passwords")
 @click.option(
-    "--uppercase", "-u", is_flag=True, default=True, help="Convert keys to uppercase"
+    "--uppercase/--no-uppercase",
+    "-u",
+    default=True,
+    help="Convert keys to uppercase",
 )
 @click.option(
     "--shell",
@@ -1046,6 +1045,7 @@ def export_env_command(
 
         # Flatten nested dictionaries
         flat_data = flatten_dict(data)
+        env_vars = build_env_vars(flat_data, prefix=prefix, uppercase=uppercase)
 
         # Detect shell if not specified (only needed if not dry-run)
         if shell is None and not dry_run:
@@ -1069,15 +1069,7 @@ def export_env_command(
             export_commands = []
             env_vars_dict = {}
 
-            for key, value in flat_data.items():
-                # Convert key to env var format
-                env_key = key.replace(".", "_").replace("-", "_")
-                if uppercase:
-                    env_key = env_key.upper()
-                env_key = prefix + env_key
-
-                # Truncate long values for display in table
-                value_str = str(value)
+            for env_key, value_str in env_vars.items():
                 display_value = value_str
                 if len(value_str) > 50:
                     display_value = value_str[:47] + "..."
@@ -1184,16 +1176,7 @@ def export_env_command(
             # Ensure shell is not None
             shell_type = shell if shell is not None else "bash"
 
-            # Build environment variables dict
-            env_vars = {}
-            for key, value in flat_data.items():
-                # Convert key to env var format
-                env_key = key.replace(".", "_").replace("-", "_")
-                if uppercase:
-                    env_key = env_key.upper()
-                env_key = prefix + env_key
-                env_vars[env_key] = str(value)
-
+            env_vars = build_env_vars(flat_data, prefix=prefix, uppercase=uppercase)
             # For nushell, use load-env command format
             if shell_type == "nushell":
                 click.echo(format_nushell_load_env(env_vars))
@@ -1220,7 +1203,10 @@ def export_env_command(
 @click.option("--prefix", "-p", default="", help="Environment variable prefix")
 @click.option("--reveal", "-r", is_flag=True, help="Reveal obscured passwords")
 @click.option(
-    "--uppercase", "-u", is_flag=True, default=True, help="Convert keys to uppercase"
+    "--uppercase/--no-uppercase",
+    "-u",
+    default=True,
+    help="Convert keys to uppercase",
 )
 @click.option(
     "--override/--no-override",
@@ -1279,17 +1265,11 @@ def run_command(
         flat_data = flatten_dict(data)
 
         # Build environment variables dict
-        env_vars = {}
-        for key, value in flat_data.items():
-            # Convert key to env var format
-            env_key = key.replace(".", "_")
-            if uppercase:
-                env_key = env_key.upper()
-            env_key = prefix + env_key
-
-            # Only add if override is True or var doesn't exist
-            if override or env_key not in os.environ:
-                env_vars[env_key] = str(value)
+        env_vars = build_env_vars(flat_data, prefix=prefix, uppercase=uppercase)
+        if not override:
+            env_vars = {
+                key: value for key, value in env_vars.items() if key not in os.environ
+            }
 
         if not commandline:
             console.print("[red]Error:[/red] No command given")
@@ -1928,28 +1908,26 @@ def _get_manager(
     password = os.environ.get("VAULTCONFIG_PASSWORD")
 
     # Load custom cipher key if provided
+    # Explicit custom keys must never fall back to the global default key.
     obscurer = None
     cipher_key_hex = os.environ.get("VAULTCONFIG_CIPHER_KEY")
     cipher_key_file = os.environ.get("VAULTCONFIG_CIPHER_KEY_FILE")
 
-    if cipher_key_file:
+    if cipher_key_file is not None:
         try:
-            key_path = Path(cipher_key_file).expanduser()
-            with open(key_path) as f:
-                cipher_key_hex = f.read().strip()
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/yellow] Failed to read cipher key file: {e}"
-            )
+            cipher_key_hex = Path(cipher_key_file).expanduser().read_text().strip()
+        except OSError:
+            raise click.ClickException(
+                "Could not read VAULTCONFIG_CIPHER_KEY_FILE"
+            ) from None
 
-    if cipher_key_hex:
+    if cipher_key_hex is not None:
         try:
             obscurer = obscure.create_obscurer_from_hex(cipher_key_hex)
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning:[/yellow] Invalid cipher key, using default: {e}"
-            )
-
+        except (TypeError, ValueError):
+            raise click.ClickException(
+                "Invalid custom cipher key. Expected 64 hexadecimal characters."
+            ) from None
     return ConfigManager(
         config_path,
         format=format,
@@ -1960,30 +1938,22 @@ def _get_manager(
 
 
 def _detect_format(config_dir: Path) -> str:
-    """Detect config format from existing files.
-
-    Args:
-        config_dir: Config directory
-
-    Returns:
-        Detected format name
-    """
-    # Count files by extension
-    extensions = {".toml": 0, ".ini": 0, ".yaml": 0, ".yml": 0}
-
-    for ext in extensions:
-        extensions[ext] = len(list(config_dir.glob(f"*{ext}")))
-
-    # Return most common format
-    if extensions[".toml"] > 0:
-        return "toml"
-    elif extensions[".ini"] > 0:
-        return "ini"
-    elif extensions[".yaml"] > 0 or extensions[".yml"] > 0:
-        return "yaml"
-
-    # Default to toml
-    return "toml"
+    """Detect the single configuration format present in a directory."""
+    detected = [
+        format_name
+        for format_name in supported_formats()
+        if any(
+            path.is_file()
+            for extension in get_format_extensions(format_name)
+            for path in config_dir.glob(f"*{extension}")
+        )
+    ]
+    if len(detected) > 1:
+        names = ", ".join(sorted(detected))
+        raise FormatError(
+            f"Mixed config formats found ({names}); specify --format explicitly"
+        )
+    return detected[0] if detected else "toml"
 
 
 def _print_dict(data: dict, indent: int = 0) -> None:
@@ -2083,26 +2053,8 @@ def _unset_nested_value(data: dict, key: str) -> bool:
 
 
 def _get_format_handler(format_name: str) -> Any:
-    """Get format handler by name.
-
-    Args:
-        format_name: Format name (toml, ini, yaml)
-
-    Returns:
-        Format handler instance
-    """
-    from vaultconfig.formats import INIFormat, TOMLFormat, YAMLFormat
-
-    handlers = {
-        "toml": TOMLFormat,
-        "ini": INIFormat,
-        "yaml": YAMLFormat,
-    }
-
-    if format_name not in handlers:
-        raise ValueError(f"Unsupported format: {format_name}")
-
-    return handlers[format_name]()
+    """Get a format handler from the shared format registry."""
+    return get_format_handler(format_name)
 
 
 def _load_schema_from_file(schema_file: str) -> Any:

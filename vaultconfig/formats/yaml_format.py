@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from vaultconfig.exceptions import FormatError
 from vaultconfig.formats.base import ConfigFormat
@@ -41,7 +41,7 @@ class YAMLFormat(ConfigFormat):
                 raise FormatError(
                     f"YAML root must be a dict, got {type(result).__name__}"
                 )
-            return result
+            return cast(dict[str, Any], result)
         except FormatError:
             raise
         except Exception as e:
@@ -78,6 +78,10 @@ class YAMLFormat(ConfigFormat):
             '.yaml'
         """
         return ".yaml"
+
+    def get_extensions(self) -> tuple[str, ...]:
+        """Get YAML file extensions."""
+        return (".yaml", ".yml")
 
     @classmethod
     def detect(cls, data: str) -> bool:

@@ -1,3 +1,2 @@
-sphinx
-sphinx_rtd_theme
-pillow
+# Documentation dependencies are maintained in pyproject.toml.
+-e .[docs]

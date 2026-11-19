@@ -1,55 +1,33 @@
 #!/usr/bin/env python
-"""
-Script to build documentation for vaultconfig.
+"""Build Sphinx documentation for VaultConfig."""
 
-This script builds the Sphinx documentation for the vaultconfig package.
-It can be run using:
-    python docs/make.py [option]
-
-Options:
-    clean   - clean the build directory
-    html    - build HTML documentation
-    dirhtml - build HTML documentation with directory structure
-    all     - build all documentation formats
-    help    - show help message
-"""
-
-import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
-def main():
-    """Run the script."""
-    sphinx_build = "sphinx-build"
-    build_dir = os.path.join("docs", "build")
-    source_dir = "docs"
+def main() -> int:
+    docs_dir = Path(__file__).resolve().parent
+    build_dir = docs_dir / "_build"
+    source_dir = docs_dir
 
-    if len(sys.argv) < 2:
-        target = "html"
-    else:
-        target = sys.argv[1]
-
+    target = sys.argv[1] if len(sys.argv) > 1 else "html"
     if target == "clean":
-        if os.path.exists(build_dir):
+        if build_dir.exists():
             print(f"Cleaning {build_dir}...")
             shutil.rmtree(build_dir)
         return 0
 
     if target == "help":
         print(__doc__)
+        print("Targets: html, dirhtml, latex, text, man, changes, linkcheck, doctest, all")
         return 0
 
-    if not os.path.exists(build_dir):
-        os.makedirs(build_dir)
-
-    # Set of valid targets
     valid_targets = {
         "html",
         "dirhtml",
         "latex",
-        "latexpdf",
         "text",
         "man",
         "changes",
@@ -57,25 +35,23 @@ def main():
         "doctest",
         "all",
     }
-
     if target not in valid_targets:
         print(f"Unknown target: {target}")
         print("Use 'help' target for help")
         return 1
 
-    if target == "all":
-        # Build all formats
-        for fmt in ["html", "dirhtml", "latex"]:
-            cmd = [sphinx_build, "-b", fmt, source_dir, os.path.join(build_dir, fmt)]
-            print(f"Building {fmt} documentation...")
-            subprocess.run(cmd, check=True)
-    else:
-        # Build specific format
-        cmd = [sphinx_build, "-b", target, source_dir, os.path.join(build_dir, target)]
-        print(f"Building {target} documentation...")
-        subprocess.run(cmd, check=True)
+    sphinx = [sys.executable, "-m", "sphinx", "-n", "-W", "--keep-going"]
+    builders = ["html", "dirhtml", "latex"] if target == "all" else [target]
+    for builder in builders:
+        output_dir = build_dir / builder
+        command = [*sphinx, "-b", builder, str(source_dir), str(output_dir)]
+        print(f"Building {builder} documentation...")
+        subprocess.run(command, check=True)
 
-    print(f"Build finished. Documentation is in {os.path.join(build_dir, target)}")
+    if target == "all":
+        print(f"Build finished. Documentation is in {build_dir}")
+    else:
+        print(f"Build finished. Documentation is in {build_dir / target}")
     return 0
 
 

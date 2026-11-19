@@ -463,3 +463,44 @@ class TestOptionalDependencyBranches:
 
         with pytest.raises(ImportError, match="PyNaCl"):
             crypt.decrypt(b"test data", "password")
+
+
+def test_decrypt_rejects_non_base64_payload_characters():
+    encrypted = crypt.encrypt(b"key = 'value'", "password")
+    lines = encrypted.splitlines()
+    corrupted = b"\n".join([lines[0], lines[1] + b"!", b""])
+
+    with pytest.raises(DecryptionError, match="Invalid base64"):
+        crypt.decrypt(corrupted, "password")
+
+
+def test_decrypt_rejects_extra_nonempty_payload_lines():
+    encrypted = crypt.encrypt(b"key = 'value'", "password")
+
+    with pytest.raises(DecryptionError, match="Unexpected extra data"):
+        crypt.decrypt(encrypted + b"unexpected\n", "password")
+
+
+def test_split_password_command_handles_windows_paths_with_spaces():
+    command = r'"C:\Program Files\Vault\password.exe" "C:\Vault Data\password.txt"'
+
+    assert crypt._split_password_command(command, windows=True) == [
+        r"C:\Program Files\Vault\password.exe",
+        r"C:\Vault Data\password.txt",
+    ]
+
+
+def test_password_command_times_out(monkeypatch):
+    import subprocess
+
+    monkeypatch.delenv(crypt.ENV_PASSWORD, raising=False)
+    monkeypatch.setenv(crypt.ENV_PASSWORD_COMMAND, "password-command")
+
+    def timeout(command, **kwargs):
+        assert kwargs["timeout"] == crypt.PASSWORD_COMMAND_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(crypt.subprocess, "run", timeout)
+
+    with pytest.raises(ValueError, match="Password command timed out"):
+        crypt.get_password()

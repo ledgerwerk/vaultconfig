@@ -114,6 +114,13 @@ class TestBuildEnvVars:
         result = build_env_vars(data)
         assert result == {"MY_KEY": "value"}
 
+    def test_values_are_converted_to_strings(self):
+        assert build_env_vars({"count": 3, "enabled": True, "missing": None}) == {
+            "COUNT": "3",
+            "ENABLED": "True",
+            "MISSING": "None",
+        }
+
 
 class TestShellQuote:
     def test_simple_string(self):

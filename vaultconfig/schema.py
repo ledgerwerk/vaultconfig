@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterator
+from types import UnionType
+from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -15,7 +17,7 @@ except ImportError:
     HAS_PYDANTIC = False
     BaseModel = object  # type: ignore[assignment, misc]
 
-    def Field(**kwargs):  # type: ignore[no-untyped-def, no-redef]
+    def Field(**kwargs: Any) -> Any:  # type: ignore[no-redef]
         """Stub for Field when pydantic is not available."""
         return
 
@@ -25,36 +27,52 @@ except ImportError:
 from vaultconfig.exceptions import SchemaValidationError
 
 
-def _get_sensitive_fields_for_model(model: Any, prefix: str = "") -> set[str]:
-    """Recursively discover sensitive fields in a Pydantic model.
+def _nested_model_annotations(
+    annotation: Any, prefix: str
+) -> Iterator[tuple[Any, str]]:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
 
-    Args:
-        model: Pydantic BaseModel class.
-        prefix: Dotted prefix for nested models.
+    if origin is Annotated:
+        yield from _nested_model_annotations(args[0], prefix)
+    elif origin in (Union, UnionType):
+        for argument in args:
+            if argument is not type(None):
+                yield from _nested_model_annotations(argument, prefix)
+    elif origin is list:
+        for argument in args:
+            yield from _nested_model_annotations(argument, f"{prefix}.*")
+    elif origin is dict and len(args) == 2:
+        yield from _nested_model_annotations(args[1], f"{prefix}.*")
+    elif isinstance(annotation, type):
+        try:
+            if issubclass(annotation, BaseModel):
+                yield annotation, prefix
+        except TypeError:
+            return
 
-    Returns:
-        Set of dotted field paths marked as sensitive.
-    """
+
+def _get_sensitive_fields_for_model(
+    model: Any, prefix: str = "", model_stack: frozenset[type] = frozenset()
+) -> set[str]:
+    """Recursively discover sensitive fields in a Pydantic model."""
+    if not HAS_PYDANTIC or not hasattr(model, "model_fields") or model in model_stack:
+        return set()
+
     sensitive: set[str] = set()
-
-    if not HAS_PYDANTIC or not hasattr(model, "model_fields"):
-        return sensitive
-
+    model_stack = model_stack | {model}
     for field_name, field_info in model.model_fields.items():
         full_name = f"{prefix}.{field_name}" if prefix else field_name
-
         extra = field_info.json_schema_extra or {}
         if isinstance(extra, dict) and extra.get("sensitive", False):
             sensitive.add(full_name)
 
-        annotation = field_info.annotation
-        if annotation is not None:
-            try:
-                if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-                    sensitive |= _get_sensitive_fields_for_model(annotation, full_name)
-            except TypeError:
-                pass
-
+        for nested_model, nested_prefix in _nested_model_annotations(
+            field_info.annotation, full_name
+        ):
+            sensitive |= _get_sensitive_fields_for_model(
+                nested_model, nested_prefix, model_stack
+            )
     return sensitive
 
 
@@ -132,7 +150,7 @@ class ConfigSchema:
         from pydantic_core import PydanticUndefined as Undef
 
         for field_name, field_info in self.model.model_fields.items():
-            if field_info.default is not Undef and field_info.default is not None:
+            if field_info.default is not Undef:
                 defaults[field_name] = field_info.default
             elif field_info.default_factory is not None:
                 defaults[field_name] = field_info.default_factory()

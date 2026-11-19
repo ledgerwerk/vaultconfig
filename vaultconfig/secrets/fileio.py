@@ -231,7 +231,7 @@ def vault_lock(path: str | os.PathLike[str]) -> Iterator[None]:
                     os.write(descriptor, b"\0")
                     os.fsync(descriptor)
                 os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
             else:
                 if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
                     raise VaultPermissionError("vault lock must be user-owned")
@@ -249,7 +249,7 @@ def vault_lock(path: str | os.PathLike[str]) -> Iterator[None]:
                         import msvcrt
 
                         os.lseek(descriptor, 0, os.SEEK_SET)
-                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
                     else:
                         fcntl.flock(descriptor, fcntl.LOCK_UN)
                 except OSError:

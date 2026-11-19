@@ -1,0 +1,7 @@
+prune .archledger
+exclude .archledger.toml
+prune .ledger
+global-exclude .repairledger/*
+global-exclude repairledger.toml VAULTCONFIG_V0_3_0_AGENT_HANDOFF.md plan.md plan.revision.md *:Zone.Identifier
+exclude ARCHITECTURE.md
+recursive-include docs *.md

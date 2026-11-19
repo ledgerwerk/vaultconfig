@@ -4,7 +4,9 @@ import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 
+from .api import SecretStore
 from .crypto import decrypt_v2, encode_passphrase, encrypt_v2
 from .envelope import MAX_SECRET_NAME_LENGTH
 from .errors import (
@@ -38,7 +40,7 @@ class FileVault:
             write_vault_file(self.path, data, overwrite=False)
 
     @contextmanager
-    def open(self, passphrase: str) -> Iterator[_UnlockedFileVault]:
+    def open(self, passphrase: str) -> Iterator[SecretStore]:
         password_bytes = encode_passphrase(passphrase, require_strength=False)
         if not password_bytes:
             raise VaultUnlockError("vault could not be unlocked")
@@ -61,7 +63,7 @@ class FileVault:
     def change_passphrase(self, old_passphrase: str, new_passphrase: str) -> None:
         new_password = encode_passphrase(new_passphrase, require_strength=True)
         with self.open(old_passphrase) as store:
-            store._change_passphrase(new_password)
+            cast(_UnlockedFileVault, store)._change_passphrase(new_password)
 
 
 class _UnlockedFileVault:

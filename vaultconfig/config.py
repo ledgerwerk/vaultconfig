@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import tempfile
@@ -10,52 +11,58 @@ from typing import Any
 
 from vaultconfig import crypt, obscure
 from vaultconfig.exceptions import (
+    ConfigExistsError,
     ConfigNotFoundError,
     EncryptionError,
     FormatError,
 )
-from vaultconfig.formats import INIFormat, TOMLFormat, YAMLFormat
-from vaultconfig.formats.base import ConfigFormat
+from vaultconfig.formats import get_format_handler, supported_formats
 from vaultconfig.schema import ConfigSchema
 
 logger = logging.getLogger(__name__)
+_MISSING = object()
 
-# Registry of available formats
-_FORMAT_REGISTRY: dict[str, type[ConfigFormat]] = {
-    "toml": TOMLFormat,
-    "ini": INIFormat,
-    "yaml": YAMLFormat,
-}
+
+def _matches_sensitive_field(key: str, sensitive_fields: set[str]) -> bool:
+    key_parts = key.split(".")
+    return any(
+        len(field_parts := field.split(".")) == len(key_parts)
+        and all(
+            expected == "*" or expected == actual
+            for expected, actual in zip(field_parts, key_parts, strict=True)
+        )
+        for field in sensitive_fields
+    )
 
 
 def _obscure_nested_value(
     data: dict[str, Any], field: str, obscurer: obscure.Obscurer
 ) -> None:
-    """Obscure a value at a potentially nested (dotted) key path.
+    """Obscure a value at a potentially nested (dotted) key path."""
 
-    Modifies ``data`` in place. Silently skips if the key path does not
-    resolve to a string value or the value is already obscured.
+    def obscure_value(value: Any, keys: list[str]) -> Any:
+        if not keys:
+            if isinstance(value, str) and not obscurer.is_obscured(value):
+                return obscurer.obscure(value)
+            return value
 
-    Args:
-        data: Configuration dictionary (mutated in place).
-        field: Dotted key path (e.g., ``'database.password'``).
-        obscurer: Obscurer instance.
-    """
-    keys = field.split(".")
-    current: Any = data
+        key = keys[0]
+        if key == "*":
+            if isinstance(value, dict):
+                for child_key, child_value in value.items():
+                    value[child_key] = obscure_value(child_value, keys[1:])
+            elif isinstance(value, list):
+                for index, child_value in enumerate(value):
+                    value[index] = obscure_value(child_value, keys[1:])
+        elif isinstance(value, dict) and key in value:
+            value[key] = obscure_value(value[key], keys[1:])
+        elif isinstance(value, list) and key.isdecimal():
+            index = int(key)
+            if index < len(value):
+                value[index] = obscure_value(value[index], keys[1:])
+        return value
 
-    for k in keys[:-1]:
-        if not isinstance(current, dict) or k not in current:
-            return
-        current = current[k]
-
-    leaf_key = keys[-1]
-    if not isinstance(current, dict) or leaf_key not in current:
-        return
-
-    value = current[leaf_key]
-    if isinstance(value, str) and not obscurer.is_obscured(value):
-        current[leaf_key] = obscurer.obscure(value)
+    obscure_value(data, field.split("."))
 
 
 def _validate_config_name(name: str) -> str:
@@ -78,74 +85,47 @@ def _validate_config_name(name: str) -> str:
     return normalized
 
 
-def _secure_write_file(path: Path, data: bytes) -> None:
-    """Write file atomically with secure permissions.
-
-    This function:
-    1. Creates temp file with secure permissions (0o600) from the start
-    2. Writes data to temp file
-    3. Atomically renames temp file to final path
-    4. Securely deletes temp file on error
-
-    Args:
-        path: Target file path
-        data: Data to write
-
-    Raises:
-        OSError: If write or rename fails
-    """
-    # Ensure parent directory exists
+def _write_temporary_file(path: Path, data: bytes) -> Path:
+    """Write data to a private temporary file beside its target."""
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Create temp file in same directory (for atomic rename on same filesystem)
-    temp_fd = None
-    temp_path = None
-
+    temporary_path: Path | None = None
     try:
-        # SECURITY: Create temp file with secure permissions (0o600) from the start
-        # This prevents race condition where file is created with default perms
-        temp_fd = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="wb",
             dir=path.parent,
             prefix=f".{path.name}.",
             suffix=".tmp",
-            delete=False,  # We'll handle deletion manually
-        )
-        temp_path = Path(temp_fd.name)
-
-        # Set secure permissions immediately (defense in depth)
-        os.chmod(temp_fd.name, 0o600)
-
-        # Write data
-        temp_fd.write(data)
-        temp_fd.flush()
-        os.fsync(temp_fd.fileno())  # Ensure data is written to disk
-        temp_fd.close()
-
-        # Atomic rename (overwrites existing file)
-        # os.replace() works atomically on both Windows and POSIX
-        os.replace(temp_fd.name, path)
-        temp_path = None  # Successfully renamed, don't delete
-
-    except Exception as e:
-        # SECURITY: Attempt secure deletion of temp file on error
-        if temp_path and temp_path.exists():
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            if os.name != "nt":
+                os.fchmod(temporary_file.fileno(), 0o600)
+            temporary_file.write(data)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        return temporary_path
+    except Exception:
+        if temporary_path is not None:
             try:
-                # Overwrite with zeros before deleting (basic secure deletion)
-                size = temp_path.stat().st_size
-                with open(temp_path, "wb") as f:
-                    f.write(b"\x00" * size)
-                    f.flush()
-                    os.fsync(f.fileno())
-                temp_path.unlink()
-            except Exception as del_error:
-                logger.warning(
-                    f"Failed to securely delete temp file {temp_path}: {del_error}"
-                )
+                temporary_path.unlink()
+            except OSError:
+                pass
+        raise
+
+
+def _secure_write_file(path: Path, data: bytes) -> None:
+    """Write a file atomically with secure permissions."""
+    temporary_path: Path | None = None
+    try:
+        temporary_path = _write_temporary_file(path, data)
+        os.replace(temporary_path, path)
+    except Exception as e:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except OSError:
+                pass
         raise OSError(f"Failed to write file {path}: {e}") from e
-    finally:
-        if temp_fd and not temp_fd.closed:
-            temp_fd.close()
 
 
 class ConfigEntry:
@@ -161,11 +141,10 @@ class ConfigEntry:
         """Initialize config entry.
 
         Args:
-            name: Config entry name
-            data: Configuration data
-            sensitive_fields: Set of field names that are sensitive (will be obscured)
-            obscurer: Obscurer instance for password obscuring/revealing
-            (uses default if None)
+            name: Configuration name
+            data: Configuration mapping
+            sensitive_fields: Dotted sensitive paths to obscure
+            obscurer: Optional obscurer used to reveal sensitive values
         """
         self.name = name
         self._data = data
@@ -173,96 +152,58 @@ class ConfigEntry:
         self._obscurer = obscurer if obscurer is not None else obscure.Obscurer()
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a configuration value, revealing obscured passwords if needed.
-
-        Args:
-            key: Configuration key (supports dot notation for nested keys)
-            default: Default value if key not found
-
-        Returns:
-            Configuration value (with passwords revealed if obscured)
-        """
-        # Support dot notation for nested keys
+        """Get a configuration value, revealing obscured passwords if needed."""
         keys = key.split(".")
         value: Any = self._data
 
-        for k in keys:
+        for path_part in keys:
             if isinstance(value, dict):
-                value = value.get(k)
-                if value is None:
-                    return default
+                value = value.get(path_part, _MISSING)
+            elif isinstance(value, list) and path_part.isdecimal():
+                index = int(path_part)
+                value = value[index] if index < len(value) else _MISSING
             else:
                 return default
+            if value is _MISSING:
+                return default
 
-        # Reveal obscured passwords for sensitive fields
-        if isinstance(value, str) and key in self._sensitive_fields:
+        if isinstance(value, str) and _matches_sensitive_field(
+            key, self._sensitive_fields
+        ):
             try:
                 return self._obscurer.reveal(value)
             except ValueError:
-                # Not obscured, return as-is
                 return value
-
         return value
 
     def get_all(self, reveal_secrets: bool = True) -> dict[str, Any]:
-        """Get all configuration values.
-
-        Args:
-            reveal_secrets: If True, reveal obscured passwords
-
-        Returns:
-            Dictionary of all configuration values
-        """
+        """Get all configuration values, optionally revealing obscured secrets."""
         if not reveal_secrets:
-            return self._data.copy()
+            return copy.deepcopy(self._data)
+        return {
+            key: self._reveal_nested(value, key) for key, value in self._data.items()
+        }
 
-        result: dict[str, Any] = {}
-        for key, value in self._data.items():
-            if isinstance(value, dict):
-                result[key] = self._reveal_nested(value, key)
-            elif isinstance(value, str):
-                # Try to reveal if it's a known sensitive field or looks obscured
-                if key in self._sensitive_fields or self._obscurer.is_obscured(value):
-                    try:
-                        result[key] = self._obscurer.reveal(value)
-                    except ValueError:
-                        result[key] = value
-                else:
-                    result[key] = value
-            else:
-                result[key] = value
-
-        return result
-
-    def _reveal_nested(self, data: dict[str, Any], prefix: str) -> dict[str, Any]:
-        """Reveal secrets in nested dictionaries.
-
-        Args:
-            data: Nested data
-            prefix: Key prefix for tracking sensitive fields
-
-        Returns:
-            Data with revealed secrets
-        """
-        result: dict[str, Any] = {}
-        for key, value in data.items():
-            full_key = f"{prefix}.{key}"
-            if isinstance(value, dict):
-                result[key] = self._reveal_nested(value, full_key)
-            elif isinstance(value, str):
-                # Try to reveal if it's a known sensitive field or looks obscured
-                if full_key in self._sensitive_fields or self._obscurer.is_obscured(
-                    value
-                ):
-                    try:
-                        result[key] = self._obscurer.reveal(value)
-                    except ValueError:
-                        result[key] = value
-                else:
-                    result[key] = value
-            else:
-                result[key] = value
-        return result
+    def _reveal_nested(self, value: Any, prefix: str) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: self._reveal_nested(child, f"{prefix}.{key}")
+                for key, child in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._reveal_nested(child, f"{prefix}.{index}")
+                for index, child in enumerate(value)
+            ]
+        if isinstance(value, str) and (
+            _matches_sensitive_field(prefix, self._sensitive_fields)
+            or self._obscurer.is_obscured(value)
+        ):
+            try:
+                return self._obscurer.reveal(value)
+            except ValueError:
+                return value
+        return value
 
 
 class ConfigManager:
@@ -281,13 +222,11 @@ class ConfigManager:
 
         Args:
             config_dir: Directory for config files
-            format: Config file format ('toml', 'ini', 'yaml')
-            schema: Optional schema for validation
-            password: Encryption password for directory-level encryption
-                (if None, configs are not encrypted by default)
-            obscurer: Obscurer instance for password obscuring (uses default if None)
-            auto_load: If True, automatically load all configs on initialization
-                (set to False to avoid password prompts when just listing files)
+            format: Config file format (toml, ini, or yaml)
+            schema: Optional configuration schema
+            password: Optional directory-level encryption password
+            obscurer: Optional obscurer for sensitive values
+            auto_load: Load existing configs during initialization
 
         Raises:
             FormatError: If format is not supported
@@ -299,16 +238,14 @@ class ConfigManager:
         self._obscurer = obscurer if obscurer is not None else obscure.Obscurer()
         self._configs: dict[str, ConfigEntry] = {}
 
-        # Get format handler
-        if format not in _FORMAT_REGISTRY:
+        try:
+            self._format_handler = get_format_handler(format)
+        except ValueError as exc:
             raise FormatError(
                 f"Unsupported format: {format}. "
-                f"Supported formats: {', '.join(_FORMAT_REGISTRY.keys())}"
-            )
-
+                f"Supported formats: {', '.join(supported_formats())}"
+            ) from exc
         self.format = format
-        self._format_handler = _FORMAT_REGISTRY[format]()
-
         # Load existing configs (unless disabled)
         if auto_load:
             self._load_all()
@@ -323,8 +260,33 @@ class ConfigManager:
             Path to config file
         """
         safe_name = _validate_config_name(name)
-        extension = self._format_handler.get_extension()
-        return self.config_dir / f"{safe_name}{extension}"
+        matches = [
+            self.config_dir / f"{safe_name}{extension}"
+            for extension in self._format_handler.get_extensions()
+            if (self.config_dir / f"{safe_name}{extension}").is_file()
+        ]
+        if len(matches) > 1:
+            raise FormatError(
+                f"Multiple {self.format} files found for config '{safe_name}'"
+            )
+        if matches:
+            return matches[0]
+        return self.config_dir / f"{safe_name}{self._format_handler.get_extension()}"
+
+    def _list_config_files(self) -> list[Path]:
+        files = sorted(
+            path
+            for extension in self._format_handler.get_extensions()
+            for path in self.config_dir.glob(f"*{extension}")
+        )
+        names: set[str] = set()
+        for path in files:
+            if path.stem in names:
+                raise FormatError(
+                    f"Multiple {self.format} files found for config '{path.stem}'"
+                )
+            names.add(path.stem)
+        return files
 
     def _load_all(self) -> None:
         """Load all configuration files from directory."""
@@ -332,9 +294,7 @@ class ConfigManager:
             logger.debug(f"Config directory not found: {self.config_dir}")
             return
 
-        extension = self._format_handler.get_extension()
-
-        for config_file in self.config_dir.glob(f"*{extension}"):
+        for config_file in self._list_config_files():
             name = config_file.stem
             try:
                 self._load_config(name)
@@ -407,34 +367,74 @@ class ConfigManager:
         )
         logger.debug(f"Loaded config '{name}' from {config_file}")
 
-    def _save_config(self, name: str) -> None:
-        """Save a single config file.
-
-        Args:
-            name: Config name
-
-        Raises:
-            EncryptionError: If encryption fails
-            FormatError: If serialization fails
-        """
+    def _serialize_config(self, name: str, password: str | None) -> bytes:
         if name not in self._configs:
             raise ConfigNotFoundError(f"Config '{name}' not found")
 
-        config_file = self._get_config_file(name)
         config_entry = self._configs[name]
-
-        # Serialize config
         config_str = self._format_handler.dump(config_entry._data)
         data = config_str.encode("utf-8")
-
-        # Encrypt if password is set (check per-config first, then directory-level)
-        password = self._config_passwords.get(name, self._password)
         if password is not None:
             data = crypt.encrypt(data, password)
+        return data
 
-        # Write file atomically with secure permissions
+    def _write_configs_transactionally(self, serialized: dict[str, bytes]) -> None:
+        staged: dict[Path, Path] = {}
+        backups: dict[Path, Path] = {}
+        replaced: list[Path] = []
+        preserved_backups: set[Path] = set()
+        try:
+            for name, data in serialized.items():
+                target = self._get_config_file(name)
+                staged[target] = _write_temporary_file(target, data)
+
+            for target in staged:
+                backups[target] = _write_temporary_file(target, target.read_bytes())
+
+            for target, temporary_path in staged.items():
+                os.replace(temporary_path, target)
+                replaced.append(target)
+        except Exception as exc:
+            rollback_failed = False
+            for target in reversed(replaced):
+                backup = backups.pop(target)
+                try:
+                    os.replace(backup, target)
+                except Exception:
+                    rollback_failed = True
+                    preserved_backups.add(backup)
+                    logger.exception(
+                        "Could not restore config file %s; backup retained at %s",
+                        target,
+                        backup,
+                    )
+            if rollback_failed:
+                raise EncryptionError(
+                    "Failed to roll back a multi-config update; "
+                    "private backups were retained"
+                ) from exc
+            raise
+        finally:
+            for temporary_path in (*staged.values(), *backups.values()):
+                if temporary_path in preserved_backups:
+                    continue
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as cleanup_error:
+                    logger.warning(
+                        "Could not remove temporary config file %s: %s",
+                        temporary_path,
+                        cleanup_error,
+                    )
+
+    def _save_config(self, name: str) -> None:
+        """Serialize and save a single config file."""
+        password = self._config_passwords.get(name, self._password)
+        data = self._serialize_config(name, password)
+        config_file = self._get_config_file(name)
         _secure_write_file(config_file, data)
-
         logger.debug(f"Saved config '{name}' to {config_file}")
 
     def list_configs(self) -> list[str]:
@@ -454,43 +454,27 @@ class ConfigManager:
         if not self.config_dir.exists():
             return []
 
-        extension = self._format_handler.get_extension()
-        config_files = []
-
-        for config_file in self.config_dir.glob(f"*{extension}"):
-            config_files.append(config_file.stem)
-
-        return config_files
+        return [path.stem for path in self._list_config_files()]
 
     def get_config(self, name: str) -> ConfigEntry | None:
-        """Get a configuration by name.
-
-        Args:
-            name: Config name
-
-        Returns:
-            ConfigEntry or None if not found
-        """
+        """Get a configuration by name, loading it if it exists on disk."""
         safe_name = _validate_config_name(name)
-        return self._configs.get(safe_name)
+        if safe_name not in self._configs:
+            if not self._get_config_file(safe_name).is_file():
+                return None
+            self._load_config(safe_name)
+        return self._configs[safe_name]
 
     def has_config(self, name: str) -> bool:
-        """Check if a config exists.
-
-        Args:
-            name: Config name
-
-        Returns:
-            True if config exists
-        """
-        safe_name = _validate_config_name(name)
-        return safe_name in self._configs
+        """Check whether a configuration file exists on disk."""
+        return self._get_config_file(name).is_file()
 
     def add_config(
         self,
         name: str,
         config: dict[str, Any],
         obscure_passwords: bool = True,
+        overwrite: bool = False,
     ) -> None:
         """Add or update a configuration.
 
@@ -505,6 +489,9 @@ class ConfigManager:
         """
         safe_name = _validate_config_name(name)
 
+        config_file = self._get_config_file(safe_name)
+        if config_file.is_file() and safe_name not in self._configs and not overwrite:
+            raise ConfigExistsError(f"Config '{safe_name}' already exists")
         # Validate schema if provided
         if self.schema:
             config = self.schema.validate(config)
@@ -551,38 +538,30 @@ class ConfigManager:
         return True
 
     def set_encryption_password(self, password: str) -> None:
-        """Set or change the encryption password.
-
-        This will re-encrypt all configs with the new password.
-
-        Args:
-            password: New encryption password
-        """
-        old_password = self._password
+        """Set or change the encryption password transactionally."""
+        serialized = {
+            name: self._serialize_config(
+                name, self._config_passwords.get(name, password)
+            )
+            for name in self.list_configs()
+        }
+        try:
+            self._write_configs_transactionally(serialized)
+        except Exception as exc:
+            raise EncryptionError(
+                f"Failed to update encryption password: {exc}"
+            ) from exc
         self._password = password
-
-        # Re-save all configs with new password
-        for name in self.list_configs():
-            try:
-                self._save_config(name)
-            except Exception as e:
-                # Rollback password on error
-                self._password = old_password
-                raise EncryptionError(
-                    f"Failed to re-encrypt config '{name}': {e}"
-                ) from e
-
         logger.info("Updated encryption password for all configs")
 
     def remove_encryption(self) -> None:
-        """Remove encryption from all configs."""
+        """Remove encryption from all configs transactionally."""
+        serialized = {
+            name: self._serialize_config(name, None) for name in self.list_configs()
+        }
+        self._write_configs_transactionally(serialized)
         self._password = None
         self._config_passwords.clear()
-
-        # Re-save all configs without encryption
-        for name in self.list_configs():
-            self._save_config(name)
-
         logger.info("Removed encryption from all configs")
 
     def is_encrypted(self) -> bool:
@@ -594,52 +573,23 @@ class ConfigManager:
         return self._password is not None
 
     def encrypt_config(self, name: str, password: str) -> None:
-        """Encrypt a specific config with its own password.
-
-        Args:
-            name: Config name
-            password: Encryption password for this config
-
-        Raises:
-            ConfigNotFoundError: If config doesn't exist
-            EncryptionError: If encryption fails
-        """
+        """Encrypt a specific config with its own password."""
         if name not in self._configs:
             raise ConfigNotFoundError(f"Config '{name}' not found")
 
-        # Store password for this config
+        data = self._serialize_config(name, password)
+        _secure_write_file(self._get_config_file(name), data)
         self._config_passwords[name] = password
-
-        # Re-save config (will be encrypted with new password)
-        self._save_config(name)
-
         logger.info(f"Encrypted config '{name}'")
 
     def decrypt_config(self, name: str) -> None:
-        """Remove encryption from a specific config.
-
-        Args:
-            name: Config name
-
-        Raises:
-            ConfigNotFoundError: If config doesn't exist
-        """
+        """Remove encryption from a specific config."""
         if name not in self._configs:
             raise ConfigNotFoundError(f"Config '{name}' not found")
 
-        # Remove per-config password
-        if name in self._config_passwords:
-            del self._config_passwords[name]
-
-        # Force a plaintext write for this config, even if directory-level
-        # encryption is currently enabled.
-        original_password = self._password
-        self._password = None
-        try:
-            self._save_config(name)
-        finally:
-            self._password = original_password
-
+        data = self._serialize_config(name, None)
+        _secure_write_file(self._get_config_file(name), data)
+        self._config_passwords.pop(name, None)
         logger.info(f"Decrypted config '{name}'")
 
     def is_config_encrypted(self, name: str) -> bool:
@@ -671,9 +621,7 @@ class ConfigManager:
             Dictionary mapping config name to encryption status
         """
         status = {}
-        extension = self._format_handler.get_extension()
-
-        for config_file in self.config_dir.glob(f"*{extension}"):
+        for config_file in self._list_config_files():
             name = config_file.stem
             try:
                 with open(config_file, "rb") as f:

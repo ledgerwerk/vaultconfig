@@ -16,7 +16,7 @@ def flatten_dict(
     data: dict[str, Any],
     parent_key: str = "",
     sep: str = ".",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Flatten a nested dictionary using a separator.
 
     Args:
@@ -88,7 +88,7 @@ def filter_dict(
 
 
 def build_env_vars(
-    flat_data: dict[str, str],
+    flat_data: dict[str, Any],
     prefix: str = "",
     uppercase: bool = True,
 ) -> dict[str, str]:
@@ -108,7 +108,7 @@ def build_env_vars(
         if uppercase:
             env_key = env_key.upper()
         env_key = prefix + env_key
-        env_vars[env_key] = value
+        env_vars[env_key] = str(value)
     return env_vars
 
 

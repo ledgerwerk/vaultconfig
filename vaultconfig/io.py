@@ -10,28 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-
-def _get_format_handler(format_name: str):
-    """Get format handler by name (internal)."""
-    from vaultconfig.formats import INIFormat, TOMLFormat, YAMLFormat
-
-    handlers = {
-        "toml": TOMLFormat,
-        "ini": INIFormat,
-        "yaml": YAMLFormat,
-    }
-    if format_name not in handlers:
-        raise ValueError(f"Unsupported format: {format_name}")
-    return handlers[format_name]()
-
-
-_SUPPORTED_EXTENSIONS: dict[str, str] = {
-    ".json": "json",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".ini": "ini",
-}
+from vaultconfig.formats import detect_format_from_extension, get_format_handler
 
 
 def detect_format_from_path(path: Path) -> str | None:
@@ -43,7 +22,9 @@ def detect_format_from_path(path: Path) -> str | None:
     Returns:
         Format name ('json', 'yaml', 'toml', 'ini') or None if unknown.
     """
-    return _SUPPORTED_EXTENSIONS.get(path.suffix.lower())
+    if path.suffix.lower() == ".json":
+        return "json"
+    return detect_format_from_extension(path.suffix)
 
 
 def load_mapping(text: str, format_name: str) -> dict[str, Any]:
@@ -63,7 +44,7 @@ def load_mapping(text: str, format_name: str) -> dict[str, Any]:
     if format_name == "json":
         data = json.loads(text)
     elif format_name in ("yaml", "toml", "ini"):
-        handler = _get_format_handler(format_name)
+        handler = get_format_handler(format_name)
         data = handler.load(text)
     else:
         raise ValueError(f"Unsupported format: {format_name}")
@@ -98,9 +79,9 @@ def load_mapping_file(
         # Try JSON first, then YAML as fallback (matching schema loader behaviour)
         content = path.read_text()
         try:
-            return json.loads(content)
+            data = json.loads(content)
         except json.JSONDecodeError:
-            handler = _get_format_handler("yaml")
+            handler = get_format_handler("yaml")
             data = handler.load(content)
     else:
         content = path.read_text()
@@ -129,7 +110,7 @@ def dump_mapping(data: dict[str, Any], format_name: str) -> str:
     if format_name == "json":
         return json.dumps(data, indent=2)
     elif format_name in ("yaml", "toml", "ini"):
-        handler = _get_format_handler(format_name)
+        handler = get_format_handler(format_name)
         return handler.dump(data)
     else:
         raise ValueError(f"Unsupported format: {format_name}")

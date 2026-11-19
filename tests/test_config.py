@@ -4,8 +4,13 @@ import pytest
 
 from vaultconfig import obscure
 from vaultconfig.config import ConfigEntry, ConfigManager
-from vaultconfig.exceptions import FormatError
-from vaultconfig.schema import FieldDef, create_simple_schema
+from vaultconfig.exceptions import (
+    ConfigExistsError,
+    EncryptionError,
+    FormatError,
+    InvalidPasswordError,
+)
+from vaultconfig.schema import ConfigSchema, FieldDef, create_simple_schema
 
 
 def test_config_entry_initialization():
@@ -26,6 +31,13 @@ def test_config_entry_get():
 def test_config_entry_get_default():
     """Test getting a configuration value with default."""
     entry = ConfigEntry("test", {"host": "localhost"})
+    assert entry.get("missing", "default") == "default"
+
+
+def test_config_entry_get_explicit_none():
+    entry = ConfigEntry("test", {"value": None, "nested": {"value": None}})
+    assert entry.get("value", "default") is None
+    assert entry.get("nested.value", "default") is None
     assert entry.get("missing", "default") == "default"
 
 
@@ -84,6 +96,15 @@ def test_config_entry_get_all_keep_secrets():
     )
     result = entry.get_all(reveal_secrets=False)
     assert result["password"] == obscured
+
+
+def test_config_entry_get_all_deep_copies_nested_data():
+    entry = ConfigEntry("test", {"nested": {"items": ["original"]}})
+
+    result = entry.get_all(reveal_secrets=False)
+    result["nested"]["items"].append("changed")
+
+    assert entry._data == {"nested": {"items": ["original"]}}
 
 
 def test_config_entry_get_all_nested_secrets():
@@ -599,3 +620,161 @@ class TestNestedObscuring:
         assert all_data["database"]["host"] == "localhost"
         assert all_data["database"]["password"] == "secret"
         assert all_data["debug"] is True
+
+
+def test_unreadable_config_exists_and_explicit_read_raises(config_dir):
+    writer = ConfigManager(config_dir, password="correct-password")
+    writer.add_config("victim", {"key": "original"}, obscure_passwords=False)
+    original = (config_dir / "victim.toml").read_bytes()
+
+    reader = ConfigManager(config_dir, password="wrong-password")
+    assert reader.has_config("victim")
+    with pytest.raises(InvalidPasswordError):
+        reader.get_config("victim")
+    with pytest.raises(ConfigExistsError):
+        reader.add_config("victim", {"key": "replacement"})
+    assert (config_dir / "victim.toml").read_bytes() == original
+
+
+def test_set_encryption_password_failure_restores_all_files(config_dir, monkeypatch):
+    from vaultconfig import config as config_module
+
+    manager = ConfigManager(config_dir)
+    manager.add_config("first", {"key": "one"}, obscure_passwords=False)
+    manager.add_config("second", {"key": "two"}, obscure_passwords=False)
+    originals = {
+        name: (config_dir / f"{name}.toml").read_bytes() for name in ("first", "second")
+    }
+    real_replace = config_module.os.replace
+    replacements = 0
+
+    def fail_second_replace(source, target):
+        nonlocal replacements
+        replacements += 1
+        if replacements == 2:
+            raise OSError("simulated commit failure")
+        real_replace(source, target)
+
+    monkeypatch.setattr(config_module.os, "replace", fail_second_replace)
+    with pytest.raises(EncryptionError):
+        manager.set_encryption_password("new-password")
+
+    assert manager._password is None
+    assert {
+        name: (config_dir / f"{name}.toml").read_bytes() for name in ("first", "second")
+    } == originals
+    assert list(config_dir.glob(".*.tmp")) == []
+
+
+def test_remove_encryption_failure_restores_all_files(config_dir, monkeypatch):
+    from vaultconfig import config as config_module
+
+    manager = ConfigManager(config_dir, password="current-password")
+    manager.add_config("first", {"key": "one"}, obscure_passwords=False)
+    manager.add_config("second", {"key": "two"}, obscure_passwords=False)
+    originals = {
+        name: (config_dir / f"{name}.toml").read_bytes() for name in ("first", "second")
+    }
+    real_replace = config_module.os.replace
+    replacements = 0
+
+    def fail_second_replace(source, target):
+        nonlocal replacements
+        replacements += 1
+        if replacements == 2:
+            raise OSError("simulated commit failure")
+        real_replace(source, target)
+
+    monkeypatch.setattr(config_module.os, "replace", fail_second_replace)
+    with pytest.raises(OSError):
+        manager.remove_encryption()
+
+    assert manager.is_encrypted()
+    assert {
+        name: (config_dir / f"{name}.toml").read_bytes() for name in ("first", "second")
+    } == originals
+    assert list(config_dir.glob(".*.tmp")) == []
+
+
+def test_encrypt_config_failure_does_not_commit_password_state(config_dir, monkeypatch):
+    from vaultconfig import config as config_module
+
+    manager = ConfigManager(config_dir)
+    manager.add_config("target", {"key": "value"}, obscure_passwords=False)
+    path = config_dir / "target.toml"
+    original = path.read_bytes()
+
+    def fail_replace(source, target):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(config_module.os, "replace", fail_replace)
+    with pytest.raises(OSError):
+        manager.encrypt_config("target", "config-password")
+
+    assert "target" not in manager._config_passwords
+    assert path.read_bytes() == original
+
+
+def test_decrypt_config_failure_preserves_password_state(config_dir, monkeypatch):
+    from vaultconfig import config as config_module
+
+    manager = ConfigManager(config_dir)
+    manager.add_config("target", {"key": "value"}, obscure_passwords=False)
+    manager.encrypt_config("target", "config-password")
+    path = config_dir / "target.toml"
+    original = path.read_bytes()
+
+    def fail_replace(source, target):
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(config_module.os, "replace", fail_replace)
+    with pytest.raises(OSError):
+        manager.decrypt_config("target")
+
+    assert manager._config_passwords["target"] == "config-password"
+    assert path.read_bytes() == original
+
+
+def test_sensitive_fields_in_collections_are_obscured_and_revealed(config_dir):
+    from pydantic import BaseModel, Field
+
+    class Credentials(BaseModel):
+        password: str = Field(json_schema_extra={"sensitive": True})
+
+    class AppConfig(BaseModel):
+        children: list[Credentials]
+        mapping: dict[str, Credentials]
+
+    manager = ConfigManager(config_dir, format="yaml", schema=ConfigSchema(AppConfig))
+    manager.add_config(
+        "app",
+        {
+            "children": [{"password": "list-secret"}],
+            "mapping": {"alpha": {"password": "dict-secret"}},
+        },
+    )
+
+    entry = manager.get_config("app")
+    assert entry.get("children.0.password") == "list-secret"
+    assert entry.get("mapping.alpha.password") == "dict-secret"
+    assert "list-secret" not in (config_dir / "app.yaml").read_text()
+    assert "dict-secret" not in (config_dir / "app.yaml").read_text()
+
+
+def test_yaml_manager_loads_yml_file(config_dir):
+    path = config_dir / "legacy.yml"
+    path.write_text("key: value\n", encoding="utf-8")
+
+    manager = ConfigManager(config_dir, format="yaml")
+
+    assert manager.has_config("legacy")
+    assert manager.list_config_files() == ["legacy"]
+    assert manager.get_config("legacy").get("key") == "value"
+
+
+def test_yaml_manager_rejects_duplicate_extension_files(config_dir):
+    (config_dir / "legacy.yaml").write_text("key: yaml\n", encoding="utf-8")
+    (config_dir / "legacy.yml").write_text("key: yml\n", encoding="utf-8")
+
+    with pytest.raises(FormatError, match="Multiple yaml files"):
+        ConfigManager(config_dir, format="yaml")
