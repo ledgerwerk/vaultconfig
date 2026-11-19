@@ -1273,7 +1273,8 @@ def test_cli_run_uppercase_boolean_pair(
     )
 
     assert result.exit_code == 0
-    assert json.loads(output.read_text(encoding="utf-8")) == {key_name: "123"}
+    expected_key = key_name.upper() if sys.platform == "win32" else key_name
+    assert json.loads(output.read_text(encoding="utf-8")) == {expected_key: "123"}
 
 
 @pytest.mark.parametrize(
