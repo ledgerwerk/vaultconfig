@@ -1258,8 +1258,9 @@ def test_cli_run_uppercase_boolean_pair(
     script.write_text(
         "import json, os\n"
         "data = {\n"
-        "    'upper': os.getenv('DATABASE_HOST_NAME'),\n"
-        "    'lower': os.getenv('database_host_name'),\n"
+        "    key: value\n"
+        "    for key, value in os.environ.items()\n"
+        "    if key.lower() == 'database_host_name'\n"
         "}\n"
         f"with open({str(output)!r}, 'w') as stream:\n"
         "    json.dump(data, stream)\n",
@@ -1272,10 +1273,7 @@ def test_cli_run_uppercase_boolean_pair(
     )
 
     assert result.exit_code == 0
-    assert json.loads(output.read_text(encoding="utf-8")) == {
-        "upper": "123" if key_name == "DATABASE_HOST_NAME" else None,
-        "lower": "123" if key_name == "database_host_name" else None,
-    }
+    assert json.loads(output.read_text(encoding="utf-8")) == {key_name: "123"}
 
 
 @pytest.mark.parametrize(

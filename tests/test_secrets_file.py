@@ -197,6 +197,7 @@ def test_file_vault_rejects_symlinked_file_and_parent(tmp_path: Path) -> None:
         FileVault(parent_link / "new.vault").initialize(PASSPHRASE)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permissions are unavailable")
 def test_file_vault_rejects_unsafe_file_permissions(tmp_path: Path) -> None:
     path = tmp_path / "credentials.vault"
     vault = FileVault(path)
