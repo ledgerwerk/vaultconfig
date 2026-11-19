@@ -77,7 +77,6 @@ def _get_config_dir(config_dir: str | None) -> Path:
 @click.version_option(version=__version__, prog_name="vaultconfig")
 def main() -> None:
     """VaultConfig - Secure configuration management with encryption support."""
-    pass
 
 
 @main.command()
@@ -1441,7 +1440,6 @@ def decrypt_command(name: str, config_dir: str | None, format: str | None) -> No
 @main.group(name="encrypt")
 def encrypt_group() -> None:
     """Manage encryption for configs."""
-    pass
 
 
 @encrypt_group.command(name="set")
@@ -1605,7 +1603,6 @@ def encrypt_check_command(config_dir: str | None, format: str | None) -> None:
 @main.group()
 def encryption() -> None:
     """Manage encryption settings."""
-    pass
 
 
 @main.command(name="encrypt-dir")
@@ -1818,7 +1815,6 @@ def validate_command(
 @main.group()
 def obscure() -> None:
     """Manage password obscuring."""
-    pass
 
 
 @obscure.command(name="generate-key")

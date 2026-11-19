@@ -22,7 +22,6 @@ class ConfigFormat(ABC):
         Raises:
             FormatError: If parsing fails
         """
-        pass
 
     @abstractmethod
     def dump(self, data: dict[str, Any]) -> str:
@@ -37,7 +36,6 @@ class ConfigFormat(ABC):
         Raises:
             FormatError: If serialization fails
         """
-        pass
 
     @abstractmethod
     def get_extension(self) -> str:
@@ -46,7 +44,6 @@ class ConfigFormat(ABC):
         Returns:
             File extension including dot (e.g., '.toml')
         """
-        pass
 
     @classmethod
     @abstractmethod
@@ -59,7 +56,6 @@ class ConfigFormat(ABC):
         Returns:
             True if data appears to be in this format
         """
-        pass
 
     @classmethod
     @abstractmethod
@@ -69,4 +65,3 @@ class ConfigFormat(ABC):
         Returns:
             Format name (e.g., 'toml', 'ini', 'yaml')
         """
-        pass

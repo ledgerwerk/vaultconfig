@@ -3,6 +3,20 @@ API Reference
 
 This page provides detailed API documentation for VaultConfig.
 
+Secret Storage
+--------------
+
+The reusable secrets API is documented in :doc:`secrets`.
+
+.. autoclass:: vaultconfig.secrets.FileVault
+   :members:
+
+.. autoclass:: vaultconfig.secrets.KeyringVault
+   :members:
+
+.. autoclass:: vaultconfig.secrets.SecretStore
+   :members:
+
 Core Classes
 ------------
 

@@ -15,9 +15,9 @@ except ImportError:
     HAS_PYDANTIC = False
     BaseModel = object  # type: ignore[assignment, misc]
 
-    def Field(**kwargs):  # type: ignore[no-untyped-def, no-redef]  # noqa: N802
+    def Field(**kwargs):  # type: ignore[no-untyped-def, no-redef]
         """Stub for Field when pydantic is not available."""
-        return None
+        return
 
     ValidationError = Exception  # type: ignore[assignment, misc]
     ConfigDict = dict  # type: ignore[assignment, misc]

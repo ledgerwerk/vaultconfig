@@ -27,6 +27,7 @@ dependencies = [
 
 dynamic=["version"]
 [project.optional-dependencies]
+keyring = ["keyring>=25,<27"]
 yaml = ["PyYAML>=6.0"]
 dev = [
     "pytest>=7.0.0",

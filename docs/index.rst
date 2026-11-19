@@ -59,6 +59,7 @@ Table of Contents
    quickstart
    cli
    security
+   secrets
    examples
 
 .. toctree::

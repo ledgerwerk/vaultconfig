@@ -9,6 +9,18 @@ from vaultconfig.exceptions import (
 )
 
 
+def test_legacy_v1_fixture_decrypts_with_existing_api() -> None:
+    fixture = (
+        b"VAULTCONFIG_ENCRYPT_V1:\n"
+        b"AAECAwQFBgcICQoLDA0ODwABAgMEBQYHCAkKCwwNDg8QERITFBUWF4i56yi+KhM5o6K7"
+        b"rjPHzYd/o/UOgcX0e5wnVTv5RXfTXCKYAWSBu+TW4zdzck6+Jcd/\n"
+    )
+
+    assert crypt.decrypt(fixture, "legacy fixture passphrase") == (
+        b"legacy-v1-config: value=preserved\n"
+    )
+
+
 class TestEncryptDecrypt:
     """Test encryption and decryption functionality."""
 
@@ -270,13 +282,13 @@ class TestGetPassword:
             # shlex.split with posix=False doesn't handle nested quotes well
             monkeypatch.setenv(
                 crypt.ENV_PASSWORD_COMMAND,
-                f'"{sys.executable}" "{str(cmd_file)}"',
+                f'"{sys.executable}" "{cmd_file!s}"',
             )
         else:
             # On Unix, we can execute the script file directly
             monkeypatch.setenv(
                 crypt.ENV_PASSWORD_COMMAND,
-                f'"{sys.executable}" "{str(cmd_file)}"',
+                f'"{sys.executable}" "{cmd_file!s}"',
             )
 
         password = crypt.get_password()
@@ -297,7 +309,7 @@ class TestGetPassword:
             "else:\n"
             "    print('old_password')\n"
         )
-        cmd = f'"{sys.executable}" "{str(cmd_file)}"'
+        cmd = f'"{sys.executable}" "{cmd_file!s}"'
 
         monkeypatch.delenv(crypt.ENV_PASSWORD, raising=False)
         monkeypatch.setenv(crypt.ENV_PASSWORD_COMMAND, cmd)

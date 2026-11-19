@@ -25,6 +25,15 @@ To enable YAML format support:
    pip install vaultconfig[yaml]
 
 This installs PyYAML as an optional dependency.
+OS Keyring Support
+~~~~~~~~~~~~~~~~~~
+
+To use ``KeyringVault`` with an OS-managed keyring, install the optional extra::
+
+   pip install 'vaultconfig[keyring]'
+
+VaultConfig accepts native Secret Service, KWallet, macOS Keychain, and Windows Vault backends. It rejects plaintext and composite fallback backends.
+
 
 Development Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -41,7 +50,7 @@ This installs:
 - ruff for linting and formatting
 - pre-commit for git hooks
 - sphinx for documentation
-- All optional dependencies
+- PyYAML for optional YAML format support
 
 All Dependencies
 ~~~~~~~~~~~~~~~~
@@ -50,7 +59,7 @@ Install everything:
 
 .. code-block:: bash
 
-   pip install vaultconfig[yaml,dev]
+   pip install vaultconfig[yaml,dev,keyring]
 
 Requirements
 ------------
@@ -71,7 +80,7 @@ Clone the repository and install in development mode:
 
    git clone https://github.com/holgern/vaultconfig.git
    cd vaultconfig
-   pip install -e ".[dev,yaml]"
+   pip install -e ".[dev,yaml,keyring]"
 
 Verifying Installation
 ----------------------
@@ -99,7 +108,7 @@ To upgrade with all optional dependencies:
 
 .. code-block:: bash
 
-   pip install --upgrade vaultconfig[yaml,dev]
+   pip install --upgrade vaultconfig[yaml,dev,keyring]
 
 Uninstalling
 ------------
