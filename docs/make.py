@@ -21,7 +21,9 @@ def main() -> int:
 
     if target == "help":
         print(__doc__)
-        print("Targets: html, dirhtml, latex, text, man, changes, linkcheck, doctest, all")
+        print(
+            "Targets: html, dirhtml, latex, text, man, changes, linkcheck, doctest, all"
+        )
         return 0
 
     valid_targets = {

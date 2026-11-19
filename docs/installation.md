@@ -6,7 +6,8 @@ VaultConfig supports Python 3.10 and later. Install the core package with pip:
 pip install vaultconfig
 ```
 
-The core installation includes TOML and INI handlers. Install optional integrations only when needed.
+The core installation includes TOML and INI handlers. Install optional integrations only
+when needed.
 
 ## Optional extras
 
@@ -15,11 +16,15 @@ pip install 'vaultconfig[yaml]'      # YAML configuration files
 pip install 'vaultconfig[keyring]'   # KeyringVault integration
 ```
 
-YAML files may use either `.yaml` or `.yml`. `KeyringVault` also requires an available native OS keyring backend accepted by VaultConfig. Installing the Python integration does not configure the operating-system keyring.
+YAML files may use either `.yaml` or `.yml`. `KeyringVault` also requires an available
+native OS keyring backend accepted by VaultConfig. Installing the Python integration
+does not configure the operating-system keyring.
 
 ## Development and documentation
 
-The `dev` extra provides pytest, pytest-cov, Ruff, mypy, pre-commit, build, twine, and PyYAML. The `docs` extra provides Sphinx, MyST, the Read the Docs theme, autodoc type hints, and image support. These extras are separate.
+The `dev` extra provides pytest, pytest-cov, Ruff, mypy, pre-commit, build, twine, and
+PyYAML. The `docs` extra provides Sphinx, MyST, the Read the Docs theme, autodoc type
+hints, and image support. These extras are separate.
 
 From a source checkout, install the complete contributor environment with:
 
@@ -39,7 +44,8 @@ Build the HTML documentation from the repository root with:
 python docs/make.py html
 ```
 
-Or use `make -C docs html` on systems with GNU Make. Both paths run Sphinx in nitpicky, warnings-as-errors mode.
+Or use `make -C docs html` on systems with GNU Make. Both paths run Sphinx in nitpicky,
+warnings-as-errors mode.
 
 ## Verify the installation
 

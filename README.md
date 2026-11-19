@@ -4,15 +4,21 @@
 
 # VaultConfig
 
-VaultConfig manages application configuration files and provides separate APIs for storing secrets. It supports TOML and INI directly, with optional YAML support, schema validation, a command-line interface, and authenticated encryption for configuration files.
+VaultConfig manages application configuration files and provides separate APIs for
+storing secrets. It supports TOML and INI directly, with optional YAML support, schema
+validation, a command-line interface, and authenticated encryption for configuration
+files.
 
 ## Features
 
 - Manage named TOML, INI, or optional YAML configurations.
 - Validate configuration data with Pydantic-backed schemas.
-- Explicitly obscure schema-marked values or values passed to the CLI with `--obscure`. Obscuring is not encryption.
-- Read and write configuration files protected by authenticated encryption using the V1 configuration-encryption format.
-- Store opaque secrets separately with a passphrase-protected `FileVault` or an optional OS-backed `KeyringVault`.
+- Explicitly obscure schema-marked values or values passed to the CLI with `--obscure`.
+  Obscuring is not encryption.
+- Read and write configuration files protected by authenticated encryption using the V1
+  configuration-encryption format.
+- Store opaque secrets separately with a passphrase-protected `FileVault` or an optional
+  OS-backed `KeyringVault`.
 
 ## Installation
 
@@ -30,7 +36,8 @@ For development, tests, and documentation:
 pip install -e '.[dev,docs,yaml,keyring]'
 ```
 
-See [installation](docs/installation.md) for the extras and [secrets](docs/secrets.md) for keyring requirements.
+See [installation](docs/installation.md) for the extras and [secrets](docs/secrets.md)
+for keyring requirements.
 
 ## Configuration quick start
 
@@ -46,7 +53,10 @@ if entry is not None:
     print(entry.get("host"))
 ```
 
-A value is obscured only when a schema marks it sensitive or the caller explicitly requests obscuring. Do not put credentials in an unencrypted configuration file. For the CLI, use `vaultconfig set --obscure`; for application secrets, prefer the dedicated secret-storage API.
+A value is obscured only when a schema marks it sensitive or the caller explicitly
+requests obscuring. Do not put credentials in an unencrypted configuration file. For the
+CLI, use `vaultconfig set --obscure`; for application secrets, prefer the dedicated
+secret-storage API.
 
 ## CLI quick start
 
@@ -56,7 +66,9 @@ vaultconfig set --config-dir ./app-config --create database host=localhost port=
 vaultconfig get --config-dir ./app-config database host
 ```
 
-`init` creates a configuration directory. It does not enable persistent encryption. See [CLI reference](docs/cli.md) for encryption commands, option aliases, format detection, and environment export.
+`init` creates a configuration directory. It does not enable persistent encryption. See
+[CLI reference](docs/cli.md) for encryption commands, option aliases, format detection,
+and environment export.
 
 ## Dedicated secret storage
 
@@ -73,13 +85,21 @@ with vault.open(getpass("Unlock the vault: ")) as store:
     store.set_secret("service-token", "value supplied by your application")
 ```
 
-`FileVault` is included in the normal installation. `KeyringVault` requires the `keyring` extra and an accepted, configured native OS keyring. Neither backend makes secrets safe from code or processes that can access them while the application is running. See [secrets](docs/secrets.md) and [security guide](docs/security.md).
+`FileVault` is included in the normal installation. `KeyringVault` requires the
+`keyring` extra and an accepted, configured native OS keyring. Neither backend makes
+secrets safe from code or processes that can access them while the application is
+running. See [secrets](docs/secrets.md) and [security guide](docs/security.md).
 
 ## Security boundaries
 
-Password obscuring is reversible concealment for casual viewing, not encryption. The default key is part of the package; a custom obscuring key does not turn this feature into secret storage. Configuration-file encryption and the V2 `FileVault` format are separate formats and APIs. VaultConfig does not automatically migrate values between them.
+Password obscuring is reversible concealment for casual viewing, not encryption. The
+default key is part of the package; a custom obscuring key does not turn this feature
+into secret storage. Configuration-file encryption and the V2 `FileVault` format are
+separate formats and APIs. VaultConfig does not automatically migrate values between
+them.
 
-See [security guide](docs/security.md) for the threat model, password handling, file permissions, and recovery limits.
+See [security guide](docs/security.md) for the threat model, password handling, file
+permissions, and recovery limits.
 
 ## Documentation
 

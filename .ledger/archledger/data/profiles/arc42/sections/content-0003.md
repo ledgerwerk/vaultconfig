@@ -15,4 +15,6 @@ source_refs:
   - vaultconfig/secrets/keyring_store.py
 ---
 
-VaultConfig runs in the calling application or CLI process. It manages local files and delegates keyring operations to a supported OS backend. It does not run a service or provide remote synchronization, shared access policy, or credential recovery.
+VaultConfig runs in the calling application or CLI process. It manages local files and
+delegates keyring operations to a supported OS backend. It does not run a service or
+provide remote synchronization, shared access policy, or credential recovery.

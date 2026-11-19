@@ -1,0 +1,307 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.3.0
+git_base_ref: v0.2.1
+git_base_sha: b305904a7cc015e491eb8222a4212adfdb0283b3
+git_head_ref: HEAD
+git_head_sha: 2a9bcb12e264c1c603966503ecfe65ac6e29929f
+git_range: b305904a7cc015e491eb8222a4212adfdb0283b3..2a9bcb12e264c1c603966503ecfe65ac6e29929f
+commit_count: 6
+rows:
+  - sha: aef2d454793045df6d9e72d036d9a9c00bad6a4b
+    source_ref: git:aef2d454793045df6d9e72d036d9a9c00bad6a4b
+    short_sha: aef2d45
+    changed_paths:
+      - .codecrate.toml
+      - .github/workflows/tests.yml
+      - .gitignore
+      - .pre-commit-config.yaml
+      - .ruff.toml
+      - .taskledger.toml
+      - LICENSE
+      - pyproject.toml
+    stats:
+      files_changed: 8
+      insertions: 115
+      deletions: 23
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - .github/workflows/tests.yml
+    observed_behavior:
+      Package installation now requires Python 3.10 or later, and CI no longer tests
+      Python 3.9.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: drop python 3.9 support, update pre-commit"
+    target_entry_id: entry-0002
+  - sha: f9f2c90b2121e1ad2364f4eb526c562476b95153
+    source_ref: git:f9f2c90b2121e1ad2364f4eb526c562476b95153
+    short_sha: f9f2c90
+    changed_paths:
+      - .gitignore
+      - .taskledger.toml
+      - docs/api.rst
+      - tests/test_cli.py
+      - tests/test_config.py
+      - tests/test_crypt.py
+      - tests/test_env_export.py
+      - tests/test_formats.py
+      - tests/test_io.py
+      - tests/test_obscure.py
+      - tests/test_schema.py
+      - vaultconfig/__init__.py
+      - vaultconfig/cli.py
+      - vaultconfig/config.py
+      - vaultconfig/env_export.py
+      - vaultconfig/io.py
+      - vaultconfig/schema.py
+    stats:
+      files_changed: 17
+      insertions: 1360
+      deletions: 343
+    inspected: true
+    inspected_paths:
+      - vaultconfig/config.py
+      - vaultconfig/schema.py
+      - vaultconfig/cli.py
+      - vaultconfig/io.py
+      - vaultconfig/env_export.py
+    observed_behavior:
+      Schema-marked fields are discovered recursively and obscured by dotted path. The
+      CLI uses shared mapping and environment serialization helpers.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: code improvements"
+    target_entry_id: entry-0003
+  - sha: 194068b5dbfd3a4eb4ca1b6a6e5d336e1d550ffc
+    source_ref: git:194068b5dbfd3a4eb4ca1b6a6e5d336e1d550ffc
+    short_sha: 194068b
+    changed_paths:
+      - .archledger.toml
+      - .archledger/sections/al_0001.md
+      - .archledger/sections/al_0002.md
+      - .archledger/sections/al_0003.md
+      - .archledger/sections/al_0004.md
+      - .archledger/sections/al_0005.md
+      - .archledger/sections/al_0006.md
+      - .archledger/sections/al_0007.md
+      - .archledger/sections/al_0008.md
+      - .archledger/sections/al_0009.md
+      - .archledger/sections/al_0010.md
+      - .archledger/sections/al_0011.md
+      - .archledger/sections/al_0012.md
+      - .archledger/source-state.json
+      - .archledger/storage.yaml
+      - ARCHITECTURE.md
+    stats:
+      files_changed: 16
+      insertions: 2082
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - ARCHITECTURE.md
+    observed_behavior:
+      Introduced an architecture overview covering configuration formats, CLI and
+      library boundaries, and file protection. The final version lives under docs.
+    public_impact: docs
+    decision: grouped
+    stale: false
+    evidence_subject: "doc: architecture doc added"
+    target_entry_key: architecture
+    target_entry_id: entry-0008
+  - sha: fb129f37310f17ec4fba7a57ff2e9415dac3a3aa
+    source_ref: git:fb129f37310f17ec4fba7a57ff2e9415dac3a3aa
+    short_sha: fb129f3
+    changed_paths:
+      - .ledger/ledger.toml
+      - .ledger/taskledger/.ledger-project.toml
+      - .ledger/taskledger/config.toml
+      - .taskledger.toml
+      - docs/api.rst
+      - docs/index.rst
+      - docs/installation.rst
+      - docs/secrets.rst
+      - pyproject.toml
+      - tests/test_crypt.py
+      - tests/test_secrets_envelope.py
+      - tests/test_secrets_file.py
+      - tests/test_secrets_keyring.py
+      - vaultconfig/__init__.py
+      - vaultconfig/cli.py
+      - vaultconfig/exceptions.py
+      - vaultconfig/formats/__init__.py
+      - vaultconfig/formats/base.py
+      - vaultconfig/schema.py
+      - vaultconfig/secrets/__init__.py
+      - vaultconfig/secrets/api.py
+      - vaultconfig/secrets/crypto.py
+      - vaultconfig/secrets/encrypted_file.py
+      - vaultconfig/secrets/envelope.py
+      - vaultconfig/secrets/errors.py
+      - vaultconfig/secrets/fileio.py
+      - vaultconfig/secrets/keyring_store.py
+    stats:
+      files_changed: 27
+      insertions: 1765
+      deletions: 153
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - vaultconfig/__init__.py
+      - vaultconfig/secrets/encrypted_file.py
+      - vaultconfig/secrets/envelope.py
+      - vaultconfig/secrets/keyring_store.py
+    observed_behavior:
+      Applications can store named strings separately using a passphrase-encrypted local
+      vault or a supported native OS keyring. Existing V1 configuration encryption
+      remains separate.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject:
+      "feat: schema version 3, prepare for release of 0.3.0 with better security"
+    target_entry_id: entry-0001
+  - sha: 0938a81017fe3cce141e326f7a89d4c553de80b4
+    source_ref: git:0938a81017fe3cce141e326f7a89d4c553de80b4
+    short_sha: 0938a81
+    changed_paths:
+      - .archledger/sections/al_0001.md
+      - .archledger/sections/al_0002.md
+      - .archledger/sections/al_0003.md
+      - .archledger/sections/al_0004.md
+      - .archledger/sections/al_0005.md
+      - .archledger/sections/al_0006.md
+      - .archledger/sections/al_0007.md
+      - .archledger/sections/al_0008.md
+      - .archledger/sections/al_0009.md
+      - .archledger/sections/al_0010.md
+      - .archledger/sections/al_0011.md
+      - .archledger/sections/al_0012.md
+      - .archledger/source-state.json
+      - .archledger/storage.yaml
+      - .ledger/archledger/.ledger-project.toml
+      - .ledger/archledger/config.toml
+      - .ledger/archledger/data/.ledger-project.toml
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0002.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0010.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0011.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - .ledger/archledger/data/storage.yaml
+      - .ledger/ledger.toml
+      - .ledger/releaseledger/.ledger-project.toml
+      - .ledger/releaseledger/config.toml
+      - .ledger/releaseledger/data/.ledger-project.toml
+      - ARCHITECTURE.md
+      - MANIFEST.in
+      - README.md
+      - docs/Makefile
+      - docs/api.md
+      - docs/api.rst
+      - docs/architecture.md
+      - docs/cli.md
+      - docs/cli.rst
+      - docs/conf.py
+      - docs/examples.md
+      - docs/examples.rst
+      - docs/index.md
+      - docs/index.rst
+      - docs/installation.md
+      - docs/installation.rst
+      - docs/make.bat
+      - docs/make.py
+      - docs/quickstart.md
+      - docs/quickstart.rst
+      - docs/requirements.txt
+      - docs/secrets.md
+      - docs/secrets.rst
+      - docs/security.md
+      - docs/security.rst
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_cli.py
+      - tests/test_config.py
+      - tests/test_crypt.py
+      - tests/test_env_export.py
+      - tests/test_schema.py
+      - vaultconfig/cli.py
+      - vaultconfig/config.py
+      - vaultconfig/crypt.py
+      - vaultconfig/env_export.py
+      - vaultconfig/formats/__init__.py
+      - vaultconfig/formats/base.py
+      - vaultconfig/formats/yaml_format.py
+      - vaultconfig/io.py
+      - vaultconfig/schema.py
+      - vaultconfig/secrets/encrypted_file.py
+      - vaultconfig/secrets/fileio.py
+    stats:
+      files_changed: 78
+      insertions: 1947
+      deletions: 6834
+    inspected: true
+    inspected_paths:
+      - vaultconfig/cli.py
+      - vaultconfig/config.py
+      - vaultconfig/crypt.py
+      - vaultconfig/formats/yaml_format.py
+      - docs/index.md
+      - docs/security.md
+    observed_behavior:
+      Bulk encryption changes stage replacements and attempt rollback after write
+      failures, format detection rejects ambiguous directories, and CLI init no longer
+      accepts an encryption flag. The user guide now uses Markdown.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: prepare for release, rewrite docs to md"
+    target_entry_id: entry-0004
+  - sha: 2a9bcb12e264c1c603966503ecfe65ac6e29929f
+    source_ref: git:2a9bcb12e264c1c603966503ecfe65ac6e29929f
+    short_sha: 2a9bcb1
+    changed_paths:
+      - .ledger/archledger/data/document-state.json
+      - .ledger/archledger/data/profiles/arc42/sections/content-0001.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0002.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0003.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0004.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0005.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0006.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0007.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0008.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0009.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0010.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0011.md
+      - .ledger/archledger/data/profiles/arc42/sections/content-0012.md
+      - .ledger/archledger/data/source-state.json
+      - docs/architecture.md
+    stats:
+      files_changed: 15
+      insertions: 496
+      deletions: 39
+    inspected: true
+    inspected_paths:
+      - docs/architecture.md
+    observed_behavior:
+      Completes the documentation of configuration and vault runtime flows, deployment
+      dependencies, and the boundary between obscuring and encryption.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "doc: architecture doc"
+    target_entry_key: architecture
+    target_entry_id: entry-0008

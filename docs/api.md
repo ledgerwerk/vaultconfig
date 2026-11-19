@@ -25,6 +25,7 @@
 ```
 
 ```{autofunction} vaultconfig.create_simple_schema
+
 ```
 
 ## Secret-storage API
@@ -60,8 +61,16 @@ The public secret-storage classes and protocol are documented in {doc}`secrets`.
 
 ## Migration from 0.2.x
 
-The 0.3 line adds the separate `vaultconfig.secrets` API. Existing V1 configuration encryption remains a distinct format; VaultConfig does not convert V1 files to V2 secret vaults automatically.
+The 0.3 line adds the separate `vaultconfig.secrets` API. Existing V1 configuration
+encryption remains a distinct format; VaultConfig does not convert V1 files to V2 secret
+vaults automatically.
 
-`vaultconfig init` creates a directory. Its `--format` option applies to that invocation and is not saved as a directory setting. If automation previously passed `init --encrypt`, remove that option and choose an explicit configuration-encryption operation such as `create --encrypted` or `encrypt set`.
+`vaultconfig init` creates a directory. Its `--format` option applies to that invocation
+and is not saved as a directory setting. If automation previously passed
+`init --encrypt`, remove that option and choose an explicit configuration-encryption
+operation such as `create --encrypted` or `encrypt set`.
 
-The `ConfigManager` API remains available. Review the command-specific help when updating scripts because directory option aliases differ by command. The `run` command supports both `--uppercase` and `--no-uppercase`; the default environment-variable prefix is empty.
+The `ConfigManager` API remains available. Review the command-specific help when
+updating scripts because directory option aliases differ by command. The `run` command
+supports both `--uppercase` and `--no-uppercase`; the default environment-variable
+prefix is empty.

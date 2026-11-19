@@ -1,10 +1,12 @@
 # Examples
 
-These examples use APIs and commands included in VaultConfig. For complete behavior and security limits, see {doc}`quickstart`, {doc}`cli`, and {doc}`security`.
+These examples use APIs and commands included in VaultConfig. For complete behavior and
+security limits, see {doc}`quickstart`, {doc}`cli`, and {doc}`security`.
 
 ## Schema-marked sensitive configuration
 
-A schema must explicitly mark a value sensitive. That value is then obscured when saved and revealed by `ConfigEntry.get`:
+A schema must explicitly mark a value sensitive. That value is then obscured when saved
+and revealed by `ConfigEntry.get`:
 
 ```python
 from pathlib import Path
@@ -25,7 +27,8 @@ if entry is not None:
     password = entry.get("password")
 ```
 
-Obscuring is reversible and does not protect the value from someone who can read the file and use the package. Use encrypted storage when protection at rest is required.
+Obscuring is reversible and does not protect the value from someone who can read the
+file and use the package. Use encrypted storage when protection at rest is required.
 
 ## Import, inspect, and execute from the CLI
 
@@ -35,7 +38,8 @@ vaultconfig show --config-dir ./app-config database --output json
 vaultconfig run --config-dir ./app-config --prefix DB_ database python app.py
 ```
 
-The `run` prefix defaults to the empty string. Use `vaultconfig run --help` for the current options.
+The `run` prefix defaults to the empty string. Use `vaultconfig run --help` for the
+current options.
 
 ## Store a secret in a file vault
 
@@ -53,7 +57,8 @@ with vault.open(getpass("Unlock the vault: ")) as store:
     store.set_secret("service-token", "value supplied by the application")
 ```
 
-Initialization refuses to overwrite an existing vault. For repeatedly run programs, provision the vault separately and do not call `initialize` on every startup.
+Initialization refuses to overwrite an existing vault. For repeatedly run programs,
+provision the vault separately and do not call `initialize` on every startup.
 
 ## Use an OS keyring
 
@@ -65,4 +70,6 @@ store.set_secret("alice@example.net", "value supplied by the application")
 secret = store.get_secret("alice@example.net")
 ```
 
-Install `vaultconfig[keyring]` and configure an accepted native OS keyring before using this example. Keyring availability and access policy depend on the operating system and user session.
+Install `vaultconfig[keyring]` and configure an accepted native OS keyring before using
+this example. Keyring availability and access policy depend on the operating system and
+user session.
