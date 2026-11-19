@@ -1,5 +1,7 @@
 """Tests for config file encryption functionality."""
 
+import binascii
+
 import pytest
 
 from vaultconfig import crypt
@@ -211,8 +213,8 @@ class TestEncryptionFormat:
         import base64
 
         try:
-            base64.b64decode(lines[1])
-        except Exception:
+            base64.b64decode(lines[1], validate=True)
+        except binascii.Error:
             pytest.fail("Encrypted data does not contain valid base64")
 
     def test_decrypt_unsupported_version(self):

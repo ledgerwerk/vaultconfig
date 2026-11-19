@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 
 from vaultconfig.config import ConfigManager
-from vaultconfig.exceptions import SchemaValidationError
+from vaultconfig.exceptions import SchemaValidationError, VaultConfigError
 from vaultconfig.obscure import obscure, reveal
 from vaultconfig.schema import ConfigSchema
 
@@ -89,7 +89,7 @@ def example_valid_config():
 
     except SchemaValidationError as e:
         print(f"✗ Validation error: {e}")
-    except Exception as e:
+    except (VaultConfigError, OSError, UnicodeError) as e:
         print(f"✗ Error loading configuration: {e}")
 
 
@@ -142,7 +142,7 @@ def example_invalid_config():
     except SchemaValidationError as e:
         print("✓ Validation correctly detected errors:")
         print(f"  {e}")
-    except Exception as e:
+    except (VaultConfigError, OSError, UnicodeError) as e:
         print(f"Error: {e}")
 
 
@@ -186,7 +186,7 @@ def example_obscured_password():
                     try:
                         revealed_password = reveal(obscured_password)
                         print(f"\nRevealed password: {revealed_password}")
-                    except Exception as e:
+                    except (ImportError, ValueError) as e:
                         print(f"\nCouldn't reveal password: {e}")
 
                 # Demonstrate obscuring a new password
@@ -204,7 +204,7 @@ def example_obscured_password():
         else:
             print("✗ Configuration 'obscured_database' not found")
 
-    except Exception as e:
+    except (VaultConfigError, OSError, UnicodeError) as e:
         print(f"✗ Error: {e}")
 
 
@@ -229,7 +229,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n\nFatal error: {e}")
         sys.exit(1)
