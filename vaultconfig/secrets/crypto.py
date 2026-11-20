@@ -12,25 +12,43 @@ from .envelope import (
     encode_plaintext,
     parse_envelope,
 )
-from .errors import SecretStoreUnavailableError, VaultError, VaultUnlockError
+from .errors import (
+    SecretStoreUnavailableError,
+    VaultError,
+    VaultPassphrasePolicyError,
+    VaultUnlockError,
+)
 
 DEFAULT_OPSLIMIT = 2
 DEFAULT_MEMLIMIT_BYTES = 64 * 1024 * 1024
-MIN_PASSPHRASE_LENGTH = 12
+DEFAULT_MIN_PASSPHRASE_LENGTH = 12
 MAX_PASSPHRASE_BYTES = 4096
 
 
-def encode_passphrase(passphrase: str, *, require_strength: bool) -> bytes:
+def encode_passphrase(
+    passphrase: str,
+    *,
+    require_strength: bool,
+    min_length: int = DEFAULT_MIN_PASSPHRASE_LENGTH,
+) -> bytes:
     if not isinstance(passphrase, str):
         raise VaultError("passphrase must be text")
-    if require_strength and len(passphrase) < MIN_PASSPHRASE_LENGTH:
-        raise VaultError("passphrase does not meet the minimum length")
+    if require_strength and len(passphrase) < min_length:
+        raise VaultPassphrasePolicyError(
+            f"passphrase must be at least {min_length} characters",
+            reason="too-short",
+            minimum_length=min_length,
+        )
     try:
         encoded = passphrase.encode("utf-8")
     except UnicodeEncodeError:
         raise VaultError("passphrase must be valid Unicode text") from None
     if len(encoded) > MAX_PASSPHRASE_BYTES:
-        raise VaultError("passphrase exceeds the size limit")
+        raise VaultPassphrasePolicyError(
+            f"passphrase must be no more than {MAX_PASSPHRASE_BYTES} UTF-8 bytes",
+            reason="too-large",
+            maximum_bytes=MAX_PASSPHRASE_BYTES,
+        )
     return encoded
 
 

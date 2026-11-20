@@ -5,6 +5,7 @@
 ### Added
 
 - Added safe FileVault metadata inspection and create-only secret creation
+- Added configurable FileVault passphrase minimums and structured policy errors.
 
 ### Changed
 

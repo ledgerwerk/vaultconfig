@@ -51,7 +51,9 @@ encryption or `FileVault`.
 
 `FileVault` stores named string secrets in the V2 envelope, using Argon2id and NaCl
 SecretBox. Secret names and values are encrypted, while format metadata, KDF parameters,
-salt, and entry count remain visible. Vault files are size-limited and validate KDF
+salt, and entry count remain visible. New passphrases use a configurable minimum-length
+policy, defaulting to 12 characters; the policy applies to initialization and passphrase
+changes, not to opening an existing vault. Vault files are size-limited and validate KDF
 parameters before running the KDF. See {doc}`secrets` for the exact limits, file
 permissions, locking, errors, and recovery behavior.
 

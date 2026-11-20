@@ -68,13 +68,29 @@ replacement. A stale concurrent session cannot silently overwrite a newer update
 Leaving the context closes the logical session and clears its mutable in-memory mapping.
 Python cannot guarantee that immutable strings or prior copies are erased from memory.
 
-`FileVault` requires a passphrase, not a short PIN. Argon2id slows offline guessing, but
-security still depends on passphrase entropy. Short numeric PINs are not suitable for a
-copied vault file. Use a strong master passphrase or an OS/hardware-backed key store
-when a short local unlock code is required. New passphrases must be at least 12
-characters and no more than 4096 UTF-8 bytes. The passphrase is used exactly as
-supplied, without Unicode normalization. A lost passphrase cannot be reset or recovered.
-Changing it requires the old passphrase:
+`FileVault` requires a passphrase, not a short PIN. New passphrases use a configurable
+minimum-length policy, defaulting to 12 characters. Applications may choose another
+minimum when constructing `FileVault`:
+
+```python
+vault = FileVault("/path/to/credentials.vault", min_passphrase_length=10)
+```
+
+The setting is a minimum character count; punctuation and digits do not reduce it. It
+applies only to vault initialization and new passphrases during a passphrase change. It
+does not stop an existing vault from opening with its original passphrase when that is
+shorter than the current minimum. A lower minimum is an application-level security
+tradeoff. Argon2id slows offline guessing but does not make a low-entropy passphrase
+equivalent to a longer one. The independent hard limit remains 4096 UTF-8 bytes.
+
+Short numeric PINs are not suitable for a copied vault file. Use a strong master
+passphrase or an OS/hardware-backed key store when a short local unlock code is
+required. Passphrases are used exactly as supplied, without Unicode normalization.
+Too-short or oversized passphrases raise `VaultPassphrasePolicyError`, a `VaultError`
+subclass with a stable `reason` (`too-short` or `too-large`) and the applicable
+`minimum_length` or `maximum_bytes` attribute. The submitted passphrase is never
+included in the error. A lost passphrase cannot be reset or recovered. Changing it
+requires the old passphrase:
 
 ```python
 vault.change_passphrase(old_passphrase, new_passphrase)

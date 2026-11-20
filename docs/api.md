@@ -32,7 +32,16 @@
 
 The public secret-storage classes and protocol are documented in {doc}`secrets`.
 
+`vaultconfig.secrets.DEFAULT_MIN_PASSPHRASE_LENGTH` is the public default value (12).
+Passphrase length-policy violations raise the structured `VaultPassphrasePolicyError`, a
+`VaultError` subclass.
+
 ```{autoclass} vaultconfig.secrets.FileVault
+:members:
+:show-inheritance:
+```
+
+```{autoclass} vaultconfig.secrets.VaultPassphrasePolicyError
 :members:
 :show-inheritance:
 ```

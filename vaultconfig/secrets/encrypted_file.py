@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import cast
 
 from .api import CreateOnlySecretStore, FileVaultInfo
-from .crypto import decrypt_v2, encode_passphrase, encrypt_v2
+from .crypto import (
+    DEFAULT_MIN_PASSPHRASE_LENGTH,
+    MAX_PASSPHRASE_BYTES,
+    decrypt_v2,
+    encode_passphrase,
+    encrypt_v2,
+)
 from .envelope import FORMAT, KDF_NAME, MAX_SECRET_NAME_LENGTH, parse_envelope
 from .errors import (
     SecretExistsError,
@@ -26,14 +32,36 @@ from .fileio import (
 
 
 class FileVault:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        min_passphrase_length: int = DEFAULT_MIN_PASSPHRASE_LENGTH,
+    ) -> None:
+        if isinstance(min_passphrase_length, bool) or not isinstance(
+            min_passphrase_length, int
+        ):
+            raise TypeError("min_passphrase_length must be an integer")
+        if not 0 < min_passphrase_length <= MAX_PASSPHRASE_BYTES:
+            raise ValueError(
+                f"min_passphrase_length must be between 1 and {MAX_PASSPHRASE_BYTES}"
+            )
+        self._min_passphrase_length = min_passphrase_length
         self.path = vault_path(path)
+
+    @property
+    def min_passphrase_length(self) -> int:
+        return self._min_passphrase_length
 
     def __repr__(self) -> str:
         return f"FileVault(path={str(self.path)!r})"
 
     def initialize(self, passphrase: str) -> None:
-        password_bytes = encode_passphrase(passphrase, require_strength=True)
+        password_bytes = encode_passphrase(
+            passphrase,
+            require_strength=True,
+            min_length=self.min_passphrase_length,
+        )
         with vault_lock(self.path):
             if vault_file_exists(self.path):
                 raise VaultConflictError("vault file already exists")
@@ -56,7 +84,11 @@ class FileVault:
 
     @contextmanager
     def open(self, passphrase: str) -> Iterator[CreateOnlySecretStore]:
-        password_bytes = encode_passphrase(passphrase, require_strength=False)
+        password_bytes = encode_passphrase(
+            passphrase,
+            require_strength=False,
+            min_length=self.min_passphrase_length,
+        )
         if not password_bytes:
             raise VaultUnlockError("vault could not be unlocked")
         try:
@@ -76,7 +108,11 @@ class FileVault:
             store.close()
 
     def change_passphrase(self, old_passphrase: str, new_passphrase: str) -> None:
-        new_password = encode_passphrase(new_passphrase, require_strength=True)
+        new_password = encode_passphrase(
+            new_passphrase,
+            require_strength=True,
+            min_length=self.min_passphrase_length,
+        )
         with self.open(old_passphrase) as store:
             cast(_UnlockedFileVault, store)._change_passphrase(new_password)
 

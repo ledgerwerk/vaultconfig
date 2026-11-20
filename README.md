@@ -93,8 +93,18 @@ running. See [secrets](docs/secrets.md) and [security guide](docs/security.md).
 `create_secret` is FileVault-only and never replaces an existing name; use `set_secret`
 when replacement is intended. `vault.inspect()` reports validated format, entry count,
 and KDF metadata without unlocking the vault or exposing secret names and values.
-FileVault requires a strong passphrase, not a short numeric PIN. Its Argon2id policy
-remains 2 operations and 64 MiB, without changing the V2 format.
+`FileVault` uses a configurable minimum of 12 characters by default. Applications may
+choose a different minimum when creating the instance:
+
+```python
+vault = FileVault("/path/to/credentials.vault", min_passphrase_length=10)
+```
+
+This setting affects initialization and new passphrases during changes, not unlocking an
+existing vault. The value is a character count, and the 4096 UTF-8-byte limit is
+unchanged. Argon2id slows offline guessing but does not make a low-entropy passphrase
+equivalent to a longer one. The Argon2id policy remains 2 operations and 64 MiB, with no
+V2 format change.
 
 ## Security boundaries
 

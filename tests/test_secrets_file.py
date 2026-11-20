@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from vaultconfig.secrets import (
+    DEFAULT_MIN_PASSPHRASE_LENGTH,
     CreateOnlySecretStore,
     FileVault,
     FileVaultInfo,
@@ -17,6 +18,7 @@ from vaultconfig.secrets import (
     VaultError,
     VaultFormatError,
     VaultLockedError,
+    VaultPassphrasePolicyError,
     VaultPermissionError,
     VaultUnlockError,
 )
@@ -132,11 +134,159 @@ def test_atomic_replacement_uses_a_private_temporary_file(
         assert replacement_modes == [0o600]
 
 
-def test_file_vault_requires_explicit_strong_passphrase(tmp_path: Path) -> None:
+def test_file_vault_uses_default_minimum_passphrase_length(tmp_path: Path) -> None:
+    assert DEFAULT_MIN_PASSPHRASE_LENGTH == 12
     vault = FileVault(tmp_path / "credentials.vault")
-    with pytest.raises(VaultError, match="minimum length"):
-        vault.initialize("short")
+
+    with pytest.raises(VaultPassphrasePolicyError) as exc:
+        vault.initialize("x" * 11)
+
+    assert exc.value.reason == "too-short"
+    assert exc.value.minimum_length == 12
+    assert exc.value.maximum_bytes is None
+    assert str(exc.value) == "passphrase must be at least 12 characters"
     assert not vault.path.exists()
+
+    vault.initialize("x" * 12)
+
+
+@pytest.mark.parametrize("passphrase", ["abcdefghij", "A1!bcdefgh"])
+def test_custom_minimum_has_no_composition_requirements(
+    tmp_path: Path,
+    passphrase: str,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=10)
+    vault.initialize(passphrase)
+
+
+def test_custom_minimum_accepts_ten_and_rejects_nine_characters(
+    tmp_path: Path,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=10)
+
+    with pytest.raises(VaultPassphrasePolicyError) as exc:
+        vault.initialize("x" * 9)
+
+    assert exc.value.reason == "too-short"
+    assert exc.value.minimum_length == 10
+    assert str(exc.value) == "passphrase must be at least 10 characters"
+    assert not vault.path.exists()
+
+    vault.initialize("x" * 10)
+
+
+@pytest.mark.parametrize(
+    ("minimum", "error_type"),
+    [
+        (True, TypeError),
+        (False, TypeError),
+        ("10", TypeError),
+        (10.0, TypeError),
+        (0, ValueError),
+        (-1, ValueError),
+        (4097, ValueError),
+    ],
+)
+def test_file_vault_rejects_invalid_minimum_before_path_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    minimum: object,
+    error_type: type[Exception],
+) -> None:
+    def fail_vault_path(path: str | Path) -> Path:
+        pytest.fail("vault path processing ran for invalid policy")
+
+    monkeypatch.setattr(
+        "vaultconfig.secrets.encrypted_file.vault_path",
+        fail_vault_path,
+    )
+    with pytest.raises(error_type):
+        FileVault(tmp_path / "credentials.vault", min_passphrase_length=minimum)
+
+
+def test_maximum_configured_minimum_is_valid(tmp_path: Path) -> None:
+    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=4096)
+    assert vault.min_passphrase_length == 4096
+
+
+def test_oversized_passphrase_has_structured_policy_error(tmp_path: Path) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+
+    with pytest.raises(VaultPassphrasePolicyError) as exc:
+        vault.initialize("x" * 4097)
+
+    assert exc.value.reason == "too-large"
+    assert exc.value.minimum_length is None
+    assert exc.value.maximum_bytes == 4096
+    assert "4096 UTF-8 bytes" in str(exc.value)
+    assert not vault.path.exists()
+
+
+def test_policy_errors_and_vault_repr_do_not_disclose_passphrase(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sentinel = "unique-sentinel-value"
+    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=64)
+
+    with pytest.raises(VaultPassphrasePolicyError) as exc:
+        vault.initialize(sentinel)
+
+    assert isinstance(exc.value, VaultError)
+    assert sentinel not in str(exc.value)
+    assert sentinel not in repr(exc.value)
+    assert sentinel not in repr(vault)
+
+    captured = capsys.readouterr()
+    assert sentinel not in captured.out
+    assert sentinel not in captured.err
+
+
+def test_default_policy_opens_and_changes_existing_short_passphrase(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "credentials.vault"
+    old_passphrase = "abcdefghij"
+    new_passphrase = "x" * 12
+    FileVault(path, min_passphrase_length=10).initialize(old_passphrase)
+    with FileVault(path, min_passphrase_length=10).open(old_passphrase) as store:
+        store.set_secret("mail", "preserved-value")
+
+    vault = FileVault(path)
+    with vault.open(old_passphrase) as store:
+        assert store.get_secret("mail") == "preserved-value"
+
+    with pytest.raises(VaultPassphrasePolicyError) as exc:
+        vault.change_passphrase(old_passphrase, "x" * 11)
+    assert exc.value.minimum_length == 12
+
+    original_contents = path.read_bytes()
+    vault.change_passphrase(old_passphrase, new_passphrase)
+    assert path.read_bytes() != original_contents
+
+    with pytest.raises(VaultUnlockError), vault.open(old_passphrase):
+        pass
+    with vault.open(new_passphrase) as store:
+        assert store.get_secret("mail") == "preserved-value"
+
+
+def test_custom_policy_changes_passphrase_to_ten_characters(tmp_path: Path) -> None:
+    path = tmp_path / "credentials.vault"
+    vault = FileVault(path, min_passphrase_length=10)
+    old_passphrase = "abcdefghij"
+    new_passphrase = "newpass123"
+    vault.initialize(old_passphrase)
+    with vault.open(old_passphrase) as store:
+        store.set_secret("mail", "preserved-value")
+
+    original_contents = path.read_bytes()
+    vault.change_passphrase(old_passphrase, new_passphrase)
+    assert path.read_bytes() != original_contents
+
+    with pytest.raises(VaultUnlockError), vault.open(old_passphrase):
+        pass
+    with vault.open(new_passphrase) as store:
+        assert store.get_secret("mail") == "preserved-value"
 
 
 def test_wrong_passphrase_and_ciphertext_tampering_have_uniform_unlock_errors(

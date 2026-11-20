@@ -1,4 +1,5 @@
 from .api import CreateOnlySecretStore, FileVaultInfo, SecretBackendInfo, SecretStore
+from .crypto import DEFAULT_MIN_PASSPHRASE_LENGTH
 from .encrypted_file import FileVault
 from .keyring_store import KeyringVault
 from .errors import (
@@ -9,11 +10,13 @@ from .errors import (
     VaultError,
     VaultFormatError,
     VaultLockedError,
+    VaultPassphrasePolicyError,
     VaultPermissionError,
     VaultUnlockError,
 )
 
 __all__ = [
+    "DEFAULT_MIN_PASSPHRASE_LENGTH",
     "CreateOnlySecretStore",
     "FileVault",
     "FileVaultInfo",
@@ -27,6 +30,7 @@ __all__ = [
     "VaultError",
     "VaultFormatError",
     "VaultLockedError",
+    "VaultPassphrasePolicyError",
     "VaultPermissionError",
     "VaultUnlockError",
 ]
