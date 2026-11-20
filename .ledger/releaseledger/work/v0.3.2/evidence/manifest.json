@@ -1,0 +1,34 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 291,
+      "deletions": 24,
+      "patch_file": "6562c61.patch",
+      "patch_sha256": "aa9b4601f620e55244c2fa5db26aa77fda4ff57b07f9426357f29155a9e8eee7",
+      "paths": [
+        "README.md",
+        "docs/api.md",
+        "docs/changelog.md",
+        "docs/secrets.md",
+        "docs/security.md",
+        "tests/test_secrets_file.py",
+        "vaultconfig/secrets/__init__.py",
+        "vaultconfig/secrets/crypto.py",
+        "vaultconfig/secrets/encrypted_file.py",
+        "vaultconfig/secrets/errors.py"
+      ],
+      "sha": "6562c616b405a383dce5bcc47c05d56ab0a7fb88",
+      "short_sha": "6562c61",
+      "source_ref": "git:6562c616b405a383dce5bcc47c05d56ab0a7fb88"
+    }
+  ],
+  "git_base_ref": "b8257f147f145d9787e0ab25ef6d27f362e93593",
+  "git_base_sha": "b8257f147f145d9787e0ab25ef6d27f362e93593",
+  "git_head_ref": "6562c616b405a383dce5bcc47c05d56ab0a7fb88",
+  "git_head_sha": "6562c616b405a383dce5bcc47c05d56ab0a7fb88",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.3.2",
+  "schema_version": 1
+}

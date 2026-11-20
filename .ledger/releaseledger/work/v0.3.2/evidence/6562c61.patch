@@ -1,0 +1,517 @@
+ README.md                             |  14 ++-
+ docs/api.md                           |   9 ++
+ docs/changelog.md                     |   1 +
+ docs/secrets.md                       |  30 +++++--
+ docs/security.md                      |   4 +-
+ tests/test_secrets_file.py            | 156 +++++++++++++++++++++++++++++++++-
+ vaultconfig/secrets/__init__.py       |   4 +
+ vaultconfig/secrets/crypto.py         |  30 +++++--
+ vaultconfig/secrets/encrypted_file.py |  46 ++++++++--
+ vaultconfig/secrets/errors.py         |  21 +++++
+ 10 files changed, 291 insertions(+), 24 deletions(-)
+
+diff --git a/README.md b/README.md
+index fd4f25a..3af2dd9 100644
+--- a/README.md
++++ b/README.md
+@@ -93,8 +93,18 @@ running. See [secrets](docs/secrets.md) and [security guide](docs/security.md).
+ `create_secret` is FileVault-only and never replaces an existing name; use `set_secret`
+ when replacement is intended. `vault.inspect()` reports validated format, entry count,
+ and KDF metadata without unlocking the vault or exposing secret names and values.
+-FileVault requires a strong passphrase, not a short numeric PIN. Its Argon2id policy
+-remains 2 operations and 64 MiB, without changing the V2 format.
++`FileVault` uses a configurable minimum of 12 characters by default. Applications may
++choose a different minimum when creating the instance:
++
++```python
++vault = FileVault("/path/to/credentials.vault", min_passphrase_length=10)
++```
++
++This setting affects initialization and new passphrases during changes, not unlocking an
++existing vault. The value is a character count, and the 4096 UTF-8-byte limit is
++unchanged. Argon2id slows offline guessing but does not make a low-entropy passphrase
++equivalent to a longer one. The Argon2id policy remains 2 operations and 64 MiB, with no
++V2 format change.
+ 
+ ## Security boundaries
+ 
+diff --git a/docs/api.md b/docs/api.md
+index 6f78b02..c900b72 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -32,11 +32,20 @@
+ 
+ The public secret-storage classes and protocol are documented in {doc}`secrets`.
+ 
++`vaultconfig.secrets.DEFAULT_MIN_PASSPHRASE_LENGTH` is the public default value (12).
++Passphrase length-policy violations raise the structured `VaultPassphrasePolicyError`, a
++`VaultError` subclass.
++
+ ```{autoclass} vaultconfig.secrets.FileVault
+ :members:
+ :show-inheritance:
+ ```
+ 
++```{autoclass} vaultconfig.secrets.VaultPassphrasePolicyError
++:members:
++:show-inheritance:
++```
++
+ ```{autoclass} vaultconfig.secrets.KeyringVault
+ :members:
+ :show-inheritance:
+diff --git a/docs/changelog.md b/docs/changelog.md
+index 170d4ed..b1ae44d 100644
+--- a/docs/changelog.md
++++ b/docs/changelog.md
+@@ -5,6 +5,7 @@
+ ### Added
+ 
+ - Added safe FileVault metadata inspection and create-only secret creation
++- Added configurable FileVault passphrase minimums and structured policy errors.
+ 
+ ### Changed
+ 
+diff --git a/docs/secrets.md b/docs/secrets.md
+index a183da6..b17a692 100644
+--- a/docs/secrets.md
++++ b/docs/secrets.md
+@@ -68,13 +68,29 @@ replacement. A stale concurrent session cannot silently overwrite a newer update
+ Leaving the context closes the logical session and clears its mutable in-memory mapping.
+ Python cannot guarantee that immutable strings or prior copies are erased from memory.
+ 
+-`FileVault` requires a passphrase, not a short PIN. Argon2id slows offline guessing, but
+-security still depends on passphrase entropy. Short numeric PINs are not suitable for a
+-copied vault file. Use a strong master passphrase or an OS/hardware-backed key store
+-when a short local unlock code is required. New passphrases must be at least 12
+-characters and no more than 4096 UTF-8 bytes. The passphrase is used exactly as
+-supplied, without Unicode normalization. A lost passphrase cannot be reset or recovered.
+-Changing it requires the old passphrase:
++`FileVault` requires a passphrase, not a short PIN. New passphrases use a configurable
++minimum-length policy, defaulting to 12 characters. Applications may choose another
++minimum when constructing `FileVault`:
++
++```python
++vault = FileVault("/path/to/credentials.vault", min_passphrase_length=10)
++```
++
++The setting is a minimum character count; punctuation and digits do not reduce it. It
++applies only to vault initialization and new passphrases during a passphrase change. It
++does not stop an existing vault from opening with its original passphrase when that is
++shorter than the current minimum. A lower minimum is an application-level security
++tradeoff. Argon2id slows offline guessing but does not make a low-entropy passphrase
++equivalent to a longer one. The independent hard limit remains 4096 UTF-8 bytes.
++
++Short numeric PINs are not suitable for a copied vault file. Use a strong master
++passphrase or an OS/hardware-backed key store when a short local unlock code is
++required. Passphrases are used exactly as supplied, without Unicode normalization.
++Too-short or oversized passphrases raise `VaultPassphrasePolicyError`, a `VaultError`
++subclass with a stable `reason` (`too-short` or `too-large`) and the applicable
++`minimum_length` or `maximum_bytes` attribute. The submitted passphrase is never
++included in the error. A lost passphrase cannot be reset or recovered. Changing it
++requires the old passphrase:
+ 
+ ```python
+ vault.change_passphrase(old_passphrase, new_passphrase)
+diff --git a/docs/security.md b/docs/security.md
+index 58550e2..466c706 100644
+--- a/docs/security.md
++++ b/docs/security.md
+@@ -51,7 +51,9 @@ encryption or `FileVault`.
+ 
+ `FileVault` stores named string secrets in the V2 envelope, using Argon2id and NaCl
+ SecretBox. Secret names and values are encrypted, while format metadata, KDF parameters,
+-salt, and entry count remain visible. Vault files are size-limited and validate KDF
++salt, and entry count remain visible. New passphrases use a configurable minimum-length
++policy, defaulting to 12 characters; the policy applies to initialization and passphrase
++changes, not to opening an existing vault. Vault files are size-limited and validate KDF
+ parameters before running the KDF. See {doc}`secrets` for the exact limits, file
+ permissions, locking, errors, and recovery behavior.
+ 
+diff --git a/tests/test_secrets_file.py b/tests/test_secrets_file.py
+index 0023ee6..3c6493c 100644
+--- a/tests/test_secrets_file.py
++++ b/tests/test_secrets_file.py
+@@ -9,6 +9,7 @@ from pathlib import Path
+ import pytest
+ 
+ from vaultconfig.secrets import (
++    DEFAULT_MIN_PASSPHRASE_LENGTH,
+     CreateOnlySecretStore,
+     FileVault,
+     FileVaultInfo,
+@@ -17,6 +18,7 @@ from vaultconfig.secrets import (
+     VaultError,
+     VaultFormatError,
+     VaultLockedError,
++    VaultPassphrasePolicyError,
+     VaultPermissionError,
+     VaultUnlockError,
+ )
+@@ -132,13 +134,161 @@ def test_atomic_replacement_uses_a_private_temporary_file(
+         assert replacement_modes == [0o600]
+ 
+ 
+-def test_file_vault_requires_explicit_strong_passphrase(tmp_path: Path) -> None:
++def test_file_vault_uses_default_minimum_passphrase_length(tmp_path: Path) -> None:
++    assert DEFAULT_MIN_PASSPHRASE_LENGTH == 12
+     vault = FileVault(tmp_path / "credentials.vault")
+-    with pytest.raises(VaultError, match="minimum length"):
+-        vault.initialize("short")
++
++    with pytest.raises(VaultPassphrasePolicyError) as exc:
++        vault.initialize("x" * 11)
++
++    assert exc.value.reason == "too-short"
++    assert exc.value.minimum_length == 12
++    assert exc.value.maximum_bytes is None
++    assert str(exc.value) == "passphrase must be at least 12 characters"
++    assert not vault.path.exists()
++
++    vault.initialize("x" * 12)
++
++
++@pytest.mark.parametrize("passphrase", ["abcdefghij", "A1!bcdefgh"])
++def test_custom_minimum_has_no_composition_requirements(
++    tmp_path: Path,
++    passphrase: str,
++) -> None:
++    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=10)
++    vault.initialize(passphrase)
++
++
++def test_custom_minimum_accepts_ten_and_rejects_nine_characters(
++    tmp_path: Path,
++) -> None:
++    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=10)
++
++    with pytest.raises(VaultPassphrasePolicyError) as exc:
++        vault.initialize("x" * 9)
++
++    assert exc.value.reason == "too-short"
++    assert exc.value.minimum_length == 10
++    assert str(exc.value) == "passphrase must be at least 10 characters"
++    assert not vault.path.exists()
++
++    vault.initialize("x" * 10)
++
++
++@pytest.mark.parametrize(
++    ("minimum", "error_type"),
++    [
++        (True, TypeError),
++        (False, TypeError),
++        ("10", TypeError),
++        (10.0, TypeError),
++        (0, ValueError),
++        (-1, ValueError),
++        (4097, ValueError),
++    ],
++)
++def test_file_vault_rejects_invalid_minimum_before_path_work(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    minimum: object,
++    error_type: type[Exception],
++) -> None:
++    def fail_vault_path(path: str | Path) -> Path:
++        pytest.fail("vault path processing ran for invalid policy")
++
++    monkeypatch.setattr(
++        "vaultconfig.secrets.encrypted_file.vault_path",
++        fail_vault_path,
++    )
++    with pytest.raises(error_type):
++        FileVault(tmp_path / "credentials.vault", min_passphrase_length=minimum)
++
++
++def test_maximum_configured_minimum_is_valid(tmp_path: Path) -> None:
++    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=4096)
++    assert vault.min_passphrase_length == 4096
++
++
++def test_oversized_passphrase_has_structured_policy_error(tmp_path: Path) -> None:
++    vault = FileVault(tmp_path / "credentials.vault")
++
++    with pytest.raises(VaultPassphrasePolicyError) as exc:
++        vault.initialize("x" * 4097)
++
++    assert exc.value.reason == "too-large"
++    assert exc.value.minimum_length is None
++    assert exc.value.maximum_bytes == 4096
++    assert "4096 UTF-8 bytes" in str(exc.value)
+     assert not vault.path.exists()
+ 
+ 
++def test_policy_errors_and_vault_repr_do_not_disclose_passphrase(
++    tmp_path: Path,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    sentinel = "unique-sentinel-value"
++    vault = FileVault(tmp_path / "credentials.vault", min_passphrase_length=64)
++
++    with pytest.raises(VaultPassphrasePolicyError) as exc:
++        vault.initialize(sentinel)
++
++    assert isinstance(exc.value, VaultError)
++    assert sentinel not in str(exc.value)
++    assert sentinel not in repr(exc.value)
++    assert sentinel not in repr(vault)
++
++    captured = capsys.readouterr()
++    assert sentinel not in captured.out
++    assert sentinel not in captured.err
++
++
++def test_default_policy_opens_and_changes_existing_short_passphrase(
++    tmp_path: Path,
++) -> None:
++    path = tmp_path / "credentials.vault"
++    old_passphrase = "abcdefghij"
++    new_passphrase = "x" * 12
++    FileVault(path, min_passphrase_length=10).initialize(old_passphrase)
++    with FileVault(path, min_passphrase_length=10).open(old_passphrase) as store:
++        store.set_secret("mail", "preserved-value")
++
++    vault = FileVault(path)
++    with vault.open(old_passphrase) as store:
++        assert store.get_secret("mail") == "preserved-value"
++
++    with pytest.raises(VaultPassphrasePolicyError) as exc:
++        vault.change_passphrase(old_passphrase, "x" * 11)
++    assert exc.value.minimum_length == 12
++
++    original_contents = path.read_bytes()
++    vault.change_passphrase(old_passphrase, new_passphrase)
++    assert path.read_bytes() != original_contents
++
++    with pytest.raises(VaultUnlockError), vault.open(old_passphrase):
++        pass
++    with vault.open(new_passphrase) as store:
++        assert store.get_secret("mail") == "preserved-value"
++
++
++def test_custom_policy_changes_passphrase_to_ten_characters(tmp_path: Path) -> None:
++    path = tmp_path / "credentials.vault"
++    vault = FileVault(path, min_passphrase_length=10)
++    old_passphrase = "abcdefghij"
++    new_passphrase = "newpass123"
++    vault.initialize(old_passphrase)
++    with vault.open(old_passphrase) as store:
++        store.set_secret("mail", "preserved-value")
++
++    original_contents = path.read_bytes()
++    vault.change_passphrase(old_passphrase, new_passphrase)
++    assert path.read_bytes() != original_contents
++
++    with pytest.raises(VaultUnlockError), vault.open(old_passphrase):
++        pass
++    with vault.open(new_passphrase) as store:
++        assert store.get_secret("mail") == "preserved-value"
++
++
+ def test_wrong_passphrase_and_ciphertext_tampering_have_uniform_unlock_errors(
+     tmp_path: Path,
+ ) -> None:
+diff --git a/vaultconfig/secrets/__init__.py b/vaultconfig/secrets/__init__.py
+index 4a4f923..58f989f 100644
+--- a/vaultconfig/secrets/__init__.py
++++ b/vaultconfig/secrets/__init__.py
+@@ -1,4 +1,5 @@
+ from .api import CreateOnlySecretStore, FileVaultInfo, SecretBackendInfo, SecretStore
++from .crypto import DEFAULT_MIN_PASSPHRASE_LENGTH
+ from .encrypted_file import FileVault
+ from .keyring_store import KeyringVault
+ from .errors import (
+@@ -9,11 +10,13 @@ from .errors import (
+     VaultError,
+     VaultFormatError,
+     VaultLockedError,
++    VaultPassphrasePolicyError,
+     VaultPermissionError,
+     VaultUnlockError,
+ )
+ 
+ __all__ = [
++    "DEFAULT_MIN_PASSPHRASE_LENGTH",
+     "CreateOnlySecretStore",
+     "FileVault",
+     "FileVaultInfo",
+@@ -27,6 +30,7 @@ __all__ = [
+     "VaultError",
+     "VaultFormatError",
+     "VaultLockedError",
++    "VaultPassphrasePolicyError",
+     "VaultPermissionError",
+     "VaultUnlockError",
+ ]
+diff --git a/vaultconfig/secrets/crypto.py b/vaultconfig/secrets/crypto.py
+index 53e5e32..460dc5a 100644
+--- a/vaultconfig/secrets/crypto.py
++++ b/vaultconfig/secrets/crypto.py
+@@ -12,25 +12,43 @@ from .envelope import (
+     encode_plaintext,
+     parse_envelope,
+ )
+-from .errors import SecretStoreUnavailableError, VaultError, VaultUnlockError
++from .errors import (
++    SecretStoreUnavailableError,
++    VaultError,
++    VaultPassphrasePolicyError,
++    VaultUnlockError,
++)
+ 
+ DEFAULT_OPSLIMIT = 2
+ DEFAULT_MEMLIMIT_BYTES = 64 * 1024 * 1024
+-MIN_PASSPHRASE_LENGTH = 12
++DEFAULT_MIN_PASSPHRASE_LENGTH = 12
+ MAX_PASSPHRASE_BYTES = 4096
+ 
+ 
+-def encode_passphrase(passphrase: str, *, require_strength: bool) -> bytes:
++def encode_passphrase(
++    passphrase: str,
++    *,
++    require_strength: bool,
++    min_length: int = DEFAULT_MIN_PASSPHRASE_LENGTH,
++) -> bytes:
+     if not isinstance(passphrase, str):
+         raise VaultError("passphrase must be text")
+-    if require_strength and len(passphrase) < MIN_PASSPHRASE_LENGTH:
+-        raise VaultError("passphrase does not meet the minimum length")
++    if require_strength and len(passphrase) < min_length:
++        raise VaultPassphrasePolicyError(
++            f"passphrase must be at least {min_length} characters",
++            reason="too-short",
++            minimum_length=min_length,
++        )
+     try:
+         encoded = passphrase.encode("utf-8")
+     except UnicodeEncodeError:
+         raise VaultError("passphrase must be valid Unicode text") from None
+     if len(encoded) > MAX_PASSPHRASE_BYTES:
+-        raise VaultError("passphrase exceeds the size limit")
++        raise VaultPassphrasePolicyError(
++            f"passphrase must be no more than {MAX_PASSPHRASE_BYTES} UTF-8 bytes",
++            reason="too-large",
++            maximum_bytes=MAX_PASSPHRASE_BYTES,
++        )
+     return encoded
+ 
+ 
+diff --git a/vaultconfig/secrets/encrypted_file.py b/vaultconfig/secrets/encrypted_file.py
+index 902d379..6da7c39 100644
+--- a/vaultconfig/secrets/encrypted_file.py
++++ b/vaultconfig/secrets/encrypted_file.py
+@@ -7,7 +7,13 @@ from pathlib import Path
+ from typing import cast
+ 
+ from .api import CreateOnlySecretStore, FileVaultInfo
+-from .crypto import decrypt_v2, encode_passphrase, encrypt_v2
++from .crypto import (
++    DEFAULT_MIN_PASSPHRASE_LENGTH,
++    MAX_PASSPHRASE_BYTES,
++    decrypt_v2,
++    encode_passphrase,
++    encrypt_v2,
++)
+ from .envelope import FORMAT, KDF_NAME, MAX_SECRET_NAME_LENGTH, parse_envelope
+ from .errors import (
+     SecretExistsError,
+@@ -26,14 +32,36 @@ from .fileio import (
+ 
+ 
+ class FileVault:
+-    def __init__(self, path: str | Path) -> None:
++    def __init__(
++        self,
++        path: str | Path,
++        *,
++        min_passphrase_length: int = DEFAULT_MIN_PASSPHRASE_LENGTH,
++    ) -> None:
++        if isinstance(min_passphrase_length, bool) or not isinstance(
++            min_passphrase_length, int
++        ):
++            raise TypeError("min_passphrase_length must be an integer")
++        if not 0 < min_passphrase_length <= MAX_PASSPHRASE_BYTES:
++            raise ValueError(
++                f"min_passphrase_length must be between 1 and {MAX_PASSPHRASE_BYTES}"
++            )
++        self._min_passphrase_length = min_passphrase_length
+         self.path = vault_path(path)
+ 
++    @property
++    def min_passphrase_length(self) -> int:
++        return self._min_passphrase_length
++
+     def __repr__(self) -> str:
+         return f"FileVault(path={str(self.path)!r})"
+ 
+     def initialize(self, passphrase: str) -> None:
+-        password_bytes = encode_passphrase(passphrase, require_strength=True)
++        password_bytes = encode_passphrase(
++            passphrase,
++            require_strength=True,
++            min_length=self.min_passphrase_length,
++        )
+         with vault_lock(self.path):
+             if vault_file_exists(self.path):
+                 raise VaultConflictError("vault file already exists")
+@@ -56,7 +84,11 @@ class FileVault:
+ 
+     @contextmanager
+     def open(self, passphrase: str) -> Iterator[CreateOnlySecretStore]:
+-        password_bytes = encode_passphrase(passphrase, require_strength=False)
++        password_bytes = encode_passphrase(
++            passphrase,
++            require_strength=False,
++            min_length=self.min_passphrase_length,
++        )
+         if not password_bytes:
+             raise VaultUnlockError("vault could not be unlocked")
+         try:
+@@ -76,7 +108,11 @@ class FileVault:
+             store.close()
+ 
+     def change_passphrase(self, old_passphrase: str, new_passphrase: str) -> None:
+-        new_password = encode_passphrase(new_passphrase, require_strength=True)
++        new_password = encode_passphrase(
++            new_passphrase,
++            require_strength=True,
++            min_length=self.min_passphrase_length,
++        )
+         with self.open(old_passphrase) as store:
+             cast(_UnlockedFileVault, store)._change_passphrase(new_password)
+ 
+diff --git a/vaultconfig/secrets/errors.py b/vaultconfig/secrets/errors.py
+index b98be65..b9c1015 100644
+--- a/vaultconfig/secrets/errors.py
++++ b/vaultconfig/secrets/errors.py
+@@ -2,6 +2,27 @@ class VaultError(Exception):
+     """Base class for secret-storage failures."""
+ 
+ 
++class VaultPassphrasePolicyError(VaultError):
++    """Raised when a new passphrase violates its length policy.
++
++    ``reason`` is either ``"too-short"`` or ``"too-large"``. Policy errors
++    never retain or display the submitted passphrase.
++    """
++
++    def __init__(
++        self,
++        message: str,
++        *,
++        reason: str,
++        minimum_length: int | None = None,
++        maximum_bytes: int | None = None,
++    ) -> None:
++        super().__init__(message)
++        self.reason = reason
++        self.minimum_length = minimum_length
++        self.maximum_bytes = maximum_bytes
++
++
+ class VaultLockedError(VaultError):
+     """Raised when a locked file vault is used."""
+ 

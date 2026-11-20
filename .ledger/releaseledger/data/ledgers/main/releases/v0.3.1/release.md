@@ -3,19 +3,19 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 4
+  revision: 5
 version: v0.3.1
-status: planned
+status: released
 history_state: curated
 title: VaultConfig 0.3.1
-released_at: null
+released_at: '2026-11-20'
 previous_version: v0.3.0
 cancel_reason: null
 superseded_by: null
 changelog_file: docs/changelog.md
 boundary_ref: null
 source_refs:
-  - tl:task-0004
+- tl:task-0004
 source_count: null
 entry_count: 3
 artifact_count: 0

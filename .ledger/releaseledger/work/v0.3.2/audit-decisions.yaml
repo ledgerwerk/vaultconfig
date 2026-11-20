@@ -1,0 +1,21 @@
+rows:
+- sha: 6562c616b405a383dce5bcc47c05d56ab0a7fb88
+  inspected: true
+  inspected_paths:
+  - README.md
+  - docs/api.md
+  - docs/changelog.md
+  - docs/secrets.md
+  - docs/security.md
+  - tests/test_secrets_file.py
+  - vaultconfig/secrets/__init__.py
+  - vaultconfig/secrets/crypto.py
+  - vaultconfig/secrets/encrypted_file.py
+  - vaultconfig/secrets/errors.py
+  observed_behavior: FileVault accepts a configurable minimum length for initialization and new passphrases in changes, defaults to 12, validates settings from 1 to 4096, and raises structured policy errors for too-short or oversized input while permitting existing vault unlocks.
+  public_impact: public
+  decision: accepted
+  target_entry_key: null
+  target_entry_id: null
+  notes: ''
+  stale: false

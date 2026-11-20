@@ -1,0 +1,33 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.3.2
+git_base_ref: b8257f147f145d9787e0ab25ef6d27f362e93593
+git_base_sha: b8257f147f145d9787e0ab25ef6d27f362e93593
+git_head_ref: 6562c616b405a383dce5bcc47c05d56ab0a7fb88
+git_head_sha: 6562c616b405a383dce5bcc47c05d56ab0a7fb88
+include_merges: nontrivial
+entries:
+- kind: added
+  summary: Added a configurable FileVault minimum passphrase length, defaulting to 12, with structured policy errors
+  status: accepted
+  source_refs:
+  - git:6562c616b405a383dce5bcc47c05d56ab0a7fb88
+  paths:
+  - README.md
+  - docs/api.md
+  - docs/changelog.md
+  - docs/secrets.md
+  - docs/security.md
+  - tests/test_secrets_file.py
+  - vaultconfig/secrets/__init__.py
+  - vaultconfig/secrets/crypto.py
+  - vaultconfig/secrets/encrypted_file.py
+  - vaultconfig/secrets/errors.py
+  sources:
+  - git:6562c616b405a383dce5bcc47c05d56ab0a7fb88
+  prs: []
+  issues: []
+  contributors:
+  - '@holgern'
