@@ -6,10 +6,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
-from .api import SecretStore
+from .api import CreateOnlySecretStore, FileVaultInfo
 from .crypto import decrypt_v2, encode_passphrase, encrypt_v2
-from .envelope import MAX_SECRET_NAME_LENGTH
+from .envelope import FORMAT, KDF_NAME, MAX_SECRET_NAME_LENGTH, parse_envelope
 from .errors import (
+    SecretExistsError,
     VaultConflictError,
     VaultFormatError,
     VaultLockedError,
@@ -39,8 +40,22 @@ class FileVault:
             data = encrypt_v2({}, password_bytes)
             write_vault_file(self.path, data, overwrite=False)
 
+    def inspect(self) -> FileVaultInfo:
+        try:
+            data = read_vault_file(self.path)
+        except FileNotFoundError:
+            raise VaultFormatError("vault file does not exist") from None
+        metadata = parse_envelope(data).metadata
+        return FileVaultInfo(
+            format=FORMAT,
+            entry_count=metadata.entry_count,
+            kdf_name=KDF_NAME,
+            opslimit=metadata.opslimit,
+            memlimit_bytes=metadata.memlimit_bytes,
+        )
+
     @contextmanager
-    def open(self, passphrase: str) -> Iterator[SecretStore]:
+    def open(self, passphrase: str) -> Iterator[CreateOnlySecretStore]:
         password_bytes = encode_passphrase(passphrase, require_strength=False)
         if not password_bytes:
             raise VaultUnlockError("vault could not be unlocked")
@@ -92,6 +107,16 @@ class _UnlockedFileVault:
         assert self._secrets is not None
         return self._secrets.get(name)
 
+    def create_secret(self, name: str, value: str) -> None:
+        self._ensure_open()
+        self._validate_name(name)
+        if not isinstance(value, str):
+            raise VaultFormatError("secret values must be strings")
+        assert self._secrets is not None
+        updated = dict(self._secrets)
+        updated[name] = value
+        self._commit(updated, create_name=name)
+
     def set_secret(self, name: str, value: str) -> None:
         self._ensure_open()
         self._validate_name(name)
@@ -131,14 +156,18 @@ class _UnlockedFileVault:
         secrets: dict[str, str],
         *,
         passphrase: bytes | None = None,
+        create_name: str | None = None,
     ) -> None:
         self._ensure_open()
+        assert self._secrets is not None
         assert self._passphrase is not None
         next_passphrase = self._passphrase if passphrase is None else passphrase
         with vault_lock(self._path):
             current = read_vault_file(self._path)
             if hashlib.sha256(current).digest() != self._revision:
                 raise VaultConflictError("vault changed during this unlocked session")
+            if create_name is not None and create_name in self._secrets:
+                raise SecretExistsError("secret already exists")
             data = encrypt_v2(secrets, next_passphrase)
             write_vault_file(self._path, data, overwrite=True)
         self._secrets = secrets

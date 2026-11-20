@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from vaultconfig.secrets import SecretStore, VaultFormatError
+from vaultconfig.secrets import (
+    FileVaultInfo,
+    SecretBackendInfo,
+    SecretExistsError,
+    SecretStore,
+    VaultError,
+    VaultFormatError,
+)
 from vaultconfig.secrets.envelope import (
     CIPHER_NAME,
     FORMAT,
@@ -206,3 +213,35 @@ def test_metadata_rejects_boolean_integer_parameters() -> None:
 def test_supported_format_constants() -> None:
     assert FORMAT == "vaultconfig-secret-v2"
     assert KDF_NAME == "argon2id"
+
+
+def test_public_diagnostic_types_and_secret_exists_error() -> None:
+    from vaultconfig import secrets as secrets_api
+
+    backend_info = SecretBackendInfo(
+        kind="keyring",
+        available=False,
+        backend=None,
+        reason="not-installed",
+    )
+    file_info = FileVaultInfo(
+        format="vaultconfig-secret-v2",
+        entry_count=3,
+        kdf_name="argon2id",
+        opslimit=2,
+        memlimit_bytes=64 * 1024 * 1024,
+    )
+
+    assert backend_info.reason == "not-installed"
+    assert file_info.entry_count == 3
+    assert not hasattr(backend_info, "__dict__")
+    with pytest.raises(AttributeError):
+        backend_info.reason = "backend-error"  # type: ignore[misc]
+    assert issubclass(SecretExistsError, VaultError)
+    assert {
+        "FileVaultInfo",
+        "SecretBackendInfo",
+        "SecretExistsError",
+    }.issubset(secrets_api.__all__)
+    assert "encrypt_v2" not in secrets_api.__all__
+    assert not hasattr(SecretStore, "create_secret")

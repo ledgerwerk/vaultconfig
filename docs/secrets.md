@@ -36,6 +36,12 @@ missing secret returns `None`; deleting a missing secret returns `False`. Backen
 failures raise `SecretStoreUnavailableError` rather than being treated as missing data.
 Secret values are not included in backend error messages.
 
+`FileVault.open()` also returns the optional `CreateOnlySecretStore` protocol, which
+adds `create_secret(name, value)` without making it a required member of `SecretStore`.
+FileVault checks for an existing name while holding the vault lock, raises
+`SecretExistsError` instead of replacing it, and retains stale-revision conflict
+protection. `KeyringVault` does not provide atomic create-only semantics.
+
 ## Passphrase-encrypted file vault
 
 Create a vault once, then explicitly unlock it for each operation. The application
@@ -47,9 +53,7 @@ from getpass import getpass
 from pathlib import Path
 from vaultconfig.secrets import FileVault
 
-vault = FileVault(
-    Path.home() / ".local/share/example/credentials.vault"
-)
+vault = FileVault(Path.home() / ".local/share/example/credentials.vault")
 
 # Run only when creating a new vault. Existing files are not overwritten.
 vault.initialize(getpass("Choose a vault passphrase: "))
@@ -64,15 +68,31 @@ replacement. A stale concurrent session cannot silently overwrite a newer update
 Leaving the context closes the logical session and clears its mutable in-memory mapping.
 Python cannot guarantee that immutable strings or prior copies are erased from memory.
 
-New passphrases must be at least 12 characters and no more than 4096 UTF-8 bytes. The
-passphrase is used exactly as supplied, without Unicode normalization. A lost passphrase
-cannot be reset or recovered. Changing it requires the old passphrase:
+`FileVault` requires a passphrase, not a short PIN. Argon2id slows offline guessing, but
+security still depends on passphrase entropy. Short numeric PINs are not suitable for a
+copied vault file. Use a strong master passphrase or an OS/hardware-backed key store
+when a short local unlock code is required. New passphrases must be at least 12
+characters and no more than 4096 UTF-8 bytes. The passphrase is used exactly as
+supplied, without Unicode normalization. A lost passphrase cannot be reset or recovered.
+Changing it requires the old passphrase:
 
 ```python
 vault.change_passphrase(old_passphrase, new_passphrase)
 ```
 
 Keep a protected backup of the encrypted vault and store its passphrase separately.
+
+### Safe metadata inspection
+
+`vault.inspect()` performs the normal bounded file read, path/permission checks, and V2
+metadata validation without decrypting the ciphertext. It returns the format, entry
+count, KDF name, operations limit, and memory limit. It does not expose secret names or
+values.
+
+```python
+info = vault.inspect()
+print(info.format, info.entry_count, info.kdf_name)
+```
 
 ### File protections and limits
 
@@ -82,12 +102,12 @@ and permissions. Recognized symlinks and unsafe paths are rejected. On Windows, 
 backend does not audit or change access-control lists; use a directory protected by the
 current user's Windows permissions.
 
-The V2 format uses Argon2id and NaCl SecretBox (XSalsa20-Poly1305). Its default Argon2id
-profile uses 2 operations and 64 MiB of memory. The parser rejects KDF settings outside
-2 to 10 operations and 19 to 256 MiB before running the KDF. Envelopes are limited to 16
-MiB, plaintext to approximately 12 MiB, and a vault to 4096 entries. Public metadata
-reveals the format, KDF settings, salt, and entry count; secret names and values are
-encrypted.
+The V2 format uses Argon2id and NaCl SecretBox (XSalsa20-Poly1305). VaultConfig pins the
+new-vault defaults to 2 operations and 64 MiB of memory. Existing V2 vaults are
+decrypted with their stored KDF parameters. The parser rejects KDF settings outside 2 to
+10 operations and 19 to 256 MiB before running the KDF. Envelopes are limited to 16 MiB,
+plaintext to approximately 12 MiB, and a vault to 4096 entries. Public metadata reveals
+the format, KDF settings, salt, and entry count; secret names and values are encrypted.
 
 ## OS keyring
 
@@ -101,6 +121,7 @@ store = KeyringVault(service="example:mail.example.net")
 store.set_secret("alice@example.net", "application password")
 password = store.get_secret("alice@example.net")
 backend = store.backend_info()
+availability = store.probe()
 ```
 
 The backend must be a supported native keyring backend with positive priority: Secret
@@ -108,8 +129,15 @@ Service, KWallet, macOS Keychain, or Windows Vault. `keyrings.alt`, plaintext fi
 backends, and composite fallback backends are rejected. There is no plaintext fallback.
 `backend_info()` returns backend type and name metadata, not secret contents.
 
-Keyring unlock behavior and process access controls vary by operating system. A keyring
-does not necessarily prompt for each read or use hardware-bound storage.
+`probe()` returns immutable `SecretBackendInfo` data without looking up a secret. A
+successful probe reports the accepted native backend family. An unavailable probe
+reports one stable reason code: `not-installed`, `no-backend`, `backend-rejected`,
+`backend-locked`, or `backend-error`. It includes no secret values or raw backend
+exception strings. There is no fallback to file or plaintext storage. `delete_secret()`
+calls the backend delete operation directly, returns `False` for a missing entry, and
+does not retrieve the secret first. Keyring unlock behavior and process access controls
+vary by operating system. A keyring does not necessarily prompt for each read or use
+hardware-bound storage.
 
 ## Errors, threat boundaries, and recovery
 

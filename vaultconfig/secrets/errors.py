@@ -28,3 +28,7 @@ class VaultPermissionError(VaultError):
 
 class VaultConflictError(VaultError):
     """Raised when a concurrent vault update would overwrite another change."""
+
+
+class SecretExistsError(VaultError):
+    """Raised when a create-only operation targets an existing secret."""

@@ -82,13 +82,19 @@ vault = FileVault(Path.home() / ".local/share/myapp/credentials.vault")
 vault.initialize(getpass("Choose a vault passphrase: "))
 
 with vault.open(getpass("Unlock the vault: ")) as store:
-    store.set_secret("service-token", "value supplied by your application")
+    store.create_secret("service-token", "value supplied by your application")
 ```
 
 `FileVault` is included in the normal installation. `KeyringVault` requires the
 `keyring` extra and an accepted, configured native OS keyring. Neither backend makes
 secrets safe from code or processes that can access them while the application is
 running. See [secrets](docs/secrets.md) and [security guide](docs/security.md).
+
+`create_secret` is FileVault-only and never replaces an existing name; use `set_secret`
+when replacement is intended. `vault.inspect()` reports validated format, entry count,
+and KDF metadata without unlocking the vault or exposing secret names and values.
+FileVault requires a strong passphrase, not a short numeric PIN. Its Argon2id policy
+remains 2 operations and 64 MiB, without changing the V2 format.
 
 ## Security boundaries
 

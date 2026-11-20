@@ -47,6 +47,26 @@ The public secret-storage classes and protocol are documented in {doc}`secrets`.
 :show-inheritance:
 ```
 
+```{autoclass} vaultconfig.secrets.FileVaultInfo
+:members:
+:show-inheritance:
+```
+
+```{autoclass} vaultconfig.secrets.SecretBackendInfo
+:members:
+:show-inheritance:
+```
+
+```{autoclass} vaultconfig.secrets.CreateOnlySecretStore
+:members:
+:show-inheritance:
+```
+
+```{autoclass} vaultconfig.secrets.SecretExistsError
+:members:
+:show-inheritance:
+```
+
 ## Encryption and obscuring
 
 ```{automodule} vaultconfig.crypt

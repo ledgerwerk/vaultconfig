@@ -9,13 +9,20 @@ from pathlib import Path
 import pytest
 
 from vaultconfig.secrets import (
+    CreateOnlySecretStore,
     FileVault,
+    FileVaultInfo,
+    SecretExistsError,
     VaultConflictError,
     VaultError,
     VaultFormatError,
     VaultLockedError,
     VaultPermissionError,
     VaultUnlockError,
+)
+from vaultconfig.secrets.crypto import (
+    DEFAULT_MEMLIMIT_BYTES,
+    DEFAULT_OPSLIMIT,
 )
 
 PASSPHRASE = "a sufficiently long example passphrase"
@@ -56,6 +63,24 @@ def test_each_file_write_uses_fresh_randomization(tmp_path: Path) -> None:
     assert first != second
 
 
+def test_each_encryption_uses_a_fresh_salt_and_nonce(tmp_path: Path) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+    first = json.loads(vault.path.read_bytes())
+
+    with vault.open(PASSPHRASE) as store:
+        store.set_secret("mail", "same-value")
+    second = json.loads(vault.path.read_bytes())
+
+    first_salt = base64.b64decode(first["kdf"]["salt"])
+    second_salt = base64.b64decode(second["kdf"]["salt"])
+    first_nonce = base64.b64decode(first["cipher"]["payload"])[:24]
+    second_nonce = base64.b64decode(second["cipher"]["payload"])[:24]
+
+    assert first_salt != second_salt
+    assert first_nonce != second_nonce
+
+
 def test_failed_atomic_replace_preserves_previous_vault(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -80,6 +105,31 @@ def test_failed_atomic_replace_preserves_previous_vault(
 
     assert vault.path.read_bytes() == original
     assert list(vault.path.parent.glob(".credentials.vault.*.tmp")) == []
+
+
+def test_atomic_replacement_uses_a_private_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+    original_replace = os.replace
+    replacement_modes: list[int] = []
+
+    def record_replace(
+        source: str | os.PathLike[str],
+        target: str | os.PathLike[str],
+    ) -> None:
+        replacement_modes.append(stat.S_IMODE(Path(source).stat().st_mode))
+        original_replace(source, target)
+
+    monkeypatch.setattr("vaultconfig.secrets.fileio.os.replace", record_replace)
+    with vault.open(PASSPHRASE) as store:
+        store.set_secret("mail", "secret")
+
+    assert len(replacement_modes) == 1
+    if os.name == "posix":
+        assert replacement_modes == [0o600]
 
 
 def test_file_vault_requires_explicit_strong_passphrase(tmp_path: Path) -> None:
@@ -188,6 +238,8 @@ def test_file_vault_rejects_symlinked_file_and_parent(tmp_path: Path) -> None:
 
     file_link = tmp_path / "file-link.vault"
     file_link.symlink_to(real_vault.path)
+    with pytest.raises(VaultPermissionError):
+        FileVault(file_link).inspect()
     with pytest.raises(VaultPermissionError), FileVault(file_link).open(PASSPHRASE):
         pass
 
@@ -207,6 +259,29 @@ def test_file_vault_rejects_unsafe_file_permissions(tmp_path: Path) -> None:
         pass
 
 
+@pytest.mark.skipif(
+    os.name != "posix" or not hasattr(os, "geteuid"),
+    reason="POSIX ownership checks are unavailable",
+)
+def test_file_vault_rejects_wrong_file_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+    original_fstat = os.fstat
+
+    def wrong_owner_fstat(descriptor: int) -> os.stat_result:
+        info = original_fstat(descriptor)
+        values = list(info)
+        values[4] = info.st_uid + 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr("vaultconfig.secrets.fileio.os.fstat", wrong_owner_fstat)
+    with pytest.raises(VaultPermissionError, match="user-owned"):
+        vault.inspect()
+
+
 def test_file_vault_rejects_oversized_file_before_unlock(tmp_path: Path) -> None:
     path = tmp_path / "credentials.vault"
     vault = FileVault(path)
@@ -215,3 +290,183 @@ def test_file_vault_rejects_oversized_file_before_unlock(tmp_path: Path) -> None
     path.chmod(0o600)
     with pytest.raises(VaultFormatError, match="size limit"), vault.open(PASSPHRASE):
         pass
+
+
+def test_new_vault_uses_explicit_argon2id_defaults(tmp_path: Path) -> None:
+    assert DEFAULT_OPSLIMIT == 2
+    assert DEFAULT_MEMLIMIT_BYTES == 64 * 1024 * 1024
+
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    kdf = json.loads(vault.path.read_bytes())["kdf"]
+    assert kdf["name"] == "argon2id"
+    assert kdf["opslimit"] == 2
+    assert kdf["memlimit_bytes"] == 64 * 1024 * 1024
+
+
+def test_existing_v2_uses_its_stored_kdf_parameters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    with monkeypatch.context() as profile:
+        profile.setattr("vaultconfig.secrets.crypto.DEFAULT_OPSLIMIT", 3)
+        profile.setattr(
+            "vaultconfig.secrets.crypto.DEFAULT_MEMLIMIT_BYTES",
+            32 * 1024 * 1024,
+        )
+        vault.initialize(PASSPHRASE)
+        with vault.open(PASSPHRASE) as store:
+            store.set_secret("legacy", "stored-kdf-value")
+
+    kdf = json.loads(vault.path.read_bytes())["kdf"]
+    assert kdf["opslimit"] == 3
+    assert kdf["memlimit_bytes"] == 32 * 1024 * 1024
+    with vault.open(PASSPHRASE) as store:
+        assert store.get_secret("legacy") == "stored-kdf-value"
+
+
+def test_invalid_kdf_metadata_is_rejected_before_derivation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    document = json.loads(vault.path.read_bytes())
+    document["kdf"]["opslimit"] = 1
+    vault.path.write_text(json.dumps(document), encoding="utf-8")
+    if os.name == "posix":
+        vault.path.chmod(0o600)
+
+    def fail_derivation(*args: object, **kwargs: object) -> bytes:
+        pytest.fail("Argon2id derivation ran for invalid metadata")
+
+    monkeypatch.setattr("vaultconfig.secrets.crypto.argon2id.kdf", fail_derivation)
+    with pytest.raises(VaultFormatError), vault.open(PASSPHRASE):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("kdf", "opslimit", 11),
+        ("kdf", "opslimit", 2.5),
+        ("kdf", "opslimit", True),
+        ("kdf", "memlimit_bytes", 18 * 1024 * 1024),
+        ("kdf", "memlimit_bytes", 257 * 1024 * 1024),
+        ("kdf", "memlimit_bytes", "67108864"),
+        ("kdf", "name", "scrypt"),
+        ("cipher", "name", "unknown-cipher"),
+    ],
+)
+def test_invalid_metadata_is_rejected_before_kdf_derivation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    field: str,
+    value: object,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    document = json.loads(vault.path.read_bytes())
+    document[section][field] = value
+    vault.path.write_text(json.dumps(document), encoding="utf-8")
+    if os.name == "posix":
+        vault.path.chmod(0o600)
+
+    def fail_derivation(*args: object, **kwargs: object) -> bytes:
+        pytest.fail("Argon2id derivation ran for invalid metadata")
+
+    monkeypatch.setattr("vaultconfig.secrets.crypto.argon2id.kdf", fail_derivation)
+    with pytest.raises(VaultFormatError), vault.open(PASSPHRASE):
+        pass
+
+
+def test_file_vault_inspect_returns_metadata_without_decryption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+    with vault.open(PASSPHRASE) as store:
+        store.set_secret("private-name", "private-secret-value")
+
+    def fail_decryption(data: bytes, passphrase: bytes) -> dict[str, str]:
+        pytest.fail("inspection attempted to decrypt the vault")
+
+    monkeypatch.setattr(
+        "vaultconfig.secrets.encrypted_file.decrypt_v2",
+        fail_decryption,
+    )
+
+    info = vault.inspect()
+
+    assert info == FileVaultInfo(
+        format="vaultconfig-secret-v2",
+        entry_count=1,
+        kdf_name="argon2id",
+        opslimit=2,
+        memlimit_bytes=64 * 1024 * 1024,
+    )
+    assert "private-name" not in repr(info)
+    assert "private-secret-value" not in repr(info)
+
+
+@pytest.mark.parametrize(
+    "invalid_envelope",
+    ["malformed", "invalid-kdf", "oversized"],
+)
+def test_file_vault_inspect_rejects_invalid_envelopes(
+    tmp_path: Path,
+    invalid_envelope: str,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    if invalid_envelope == "malformed":
+        vault.path.write_bytes(b"not-json")
+    elif invalid_envelope == "invalid-kdf":
+        document = json.loads(vault.path.read_bytes())
+        document["kdf"]["opslimit"] = 1
+        vault.path.write_text(json.dumps(document), encoding="utf-8")
+    else:
+        vault.path.write_bytes(b"x" * (16 * 1024 * 1024 + 1))
+    if os.name == "posix":
+        vault.path.chmod(0o600)
+
+    with pytest.raises(VaultFormatError):
+        vault.inspect()
+
+
+def test_file_vault_create_secret_only_creates_missing_names(tmp_path: Path) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    with vault.open(PASSPHRASE) as store:
+        assert isinstance(store, CreateOnlySecretStore)
+        store.create_secret("mail", "first-value")
+        store.create_secret("empty", "")
+        assert store.get_secret("mail") == "first-value"
+        assert store.get_secret("empty") == ""
+        with pytest.raises(SecretExistsError):
+            store.create_secret("mail", "replacement-value")
+        assert store.get_secret("mail") == "first-value"
+
+
+def test_file_vault_create_secret_does_not_overwrite_concurrent_creation(
+    tmp_path: Path,
+) -> None:
+    vault = FileVault(tmp_path / "credentials.vault")
+    vault.initialize(PASSPHRASE)
+
+    with vault.open(PASSPHRASE) as first, vault.open(PASSPHRASE) as second:
+        assert first.get_secret("shared") is None
+        second.create_secret("shared", "second-value")
+        with pytest.raises(VaultConflictError):
+            first.create_secret("shared", "first-value")
+
+    with vault.open(PASSPHRASE) as store:
+        assert store.get_secret("shared") == "second-value"
