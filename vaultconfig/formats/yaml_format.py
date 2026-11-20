@@ -44,7 +44,7 @@ class YAMLFormat(ConfigFormat):
             return cast(dict[str, Any], result)
         except FormatError:
             raise
-        except Exception as e:
+        except (TypeError, ValueError, yaml.YAMLError) as e:
             raise FormatError(f"Failed to parse YAML: {e}") from e
 
     def dump(self, data: dict[str, Any]) -> str:
@@ -68,7 +68,7 @@ class YAMLFormat(ConfigFormat):
             return yaml.safe_dump(
                 data, default_flow_style=False, allow_unicode=True, sort_keys=False
             )
-        except Exception as e:
+        except (TypeError, ValueError, yaml.YAMLError) as e:
             raise FormatError(f"Failed to serialize to YAML: {e}") from e
 
     def get_extension(self) -> str:
@@ -101,7 +101,7 @@ class YAMLFormat(ConfigFormat):
             result = yaml.safe_load(data)
             # Must parse to a dict
             return isinstance(result, dict)
-        except Exception:
+        except yaml.YAMLError:
             return False
 
     @classmethod

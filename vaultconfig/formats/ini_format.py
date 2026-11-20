@@ -66,7 +66,7 @@ class INIFormat(ConfigFormat):
                 result[section] = dict(parser.items(section))
 
             return result
-        except Exception as e:
+        except (configparser.Error, TypeError, ValueError) as e:
             raise FormatError(f"Failed to parse INI: {e}") from e
 
     def dump(self, data: dict[str, Any]) -> str:
@@ -114,7 +114,7 @@ class INIFormat(ConfigFormat):
             return output.getvalue()
         except FormatError:
             raise
-        except Exception as e:
+        except (configparser.Error, TypeError, ValueError) as e:
             raise FormatError(f"Failed to serialize to INI: {e}") from e
 
     def get_extension(self) -> str:
@@ -144,7 +144,7 @@ class INIFormat(ConfigFormat):
             parser.read_string(data)
             # Must have at least one section or DEFAULT values
             return len(parser.sections()) > 0 or len(parser.defaults()) > 0
-        except Exception:
+        except configparser.Error:
             return False
 
     @classmethod

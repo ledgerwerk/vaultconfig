@@ -21,6 +21,7 @@ from vaultconfig import (
     create_obscurer_from_hex,
     create_obscurer_from_passphrase,
 )
+from vaultconfig.exceptions import VaultConfigError
 from vaultconfig.schema import ConfigSchema
 
 
@@ -242,14 +243,14 @@ def example_different_keys_comparison():
         # Try to reveal password obscured with Key-1 using Key-2
         wrong_reveal = obscurer2.reveal(obscured1)
         print(f"  Key-2 revealed Key-1's password: {wrong_reveal} (WRONG!)")
-    except Exception:
+    except ValueError:
         print("  ✓ Key-2 cannot reveal Key-1's password (as expected)")
 
     try:
         # Try to reveal password obscured with Key-1 using default key
         wrong_reveal = obscurer3.reveal(obscured1)
         print(f"  Default revealed Key-1's password: {wrong_reveal} (WRONG!)")
-    except Exception:
+    except ValueError:
         print("  ✓ Default key cannot reveal Key-1's password (as expected)")
 
     print("\nRevealing with correct keys:")
@@ -291,7 +292,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         sys.exit(1)
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"\n\nFatal error: {e}")
         import traceback
 

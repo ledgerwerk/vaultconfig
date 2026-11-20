@@ -46,7 +46,7 @@ class TOMLFormat(ConfigFormat):
 
         try:
             return tomllib.loads(data)
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             raise FormatError(f"Failed to parse TOML: {e}") from e
 
     def dump(self, data: dict[str, Any]) -> str:
@@ -68,7 +68,7 @@ class TOMLFormat(ConfigFormat):
 
         try:
             return tomli_w.dumps(data)
-        except Exception as e:
+        except (TypeError, ValueError) as e:
             raise FormatError(f"Failed to serialize to TOML: {e}") from e
 
     def get_extension(self) -> str:
@@ -99,7 +99,7 @@ class TOMLFormat(ConfigFormat):
         try:
             tomllib.loads(data)
             return True
-        except Exception:
+        except (TypeError, ValueError):
             return False
 
     @classmethod

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from vaultconfig import create_obscurer_from_passphrase
 from vaultconfig.config import ConfigManager
-from vaultconfig.exceptions import SchemaValidationError
+from vaultconfig.exceptions import SchemaValidationError, VaultConfigError
 from vaultconfig.schema import ConfigSchema
 
 # Create a unique cipher key for this example/application
@@ -88,7 +88,7 @@ def example_valid_config():
 
     except SchemaValidationError as e:
         print(f"✗ Validation error: {e}")
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"✗ Error loading configuration: {e}")
 
 
@@ -127,7 +127,7 @@ def example_invalid_config():
             try:
                 schema.validate(raw_data)
                 print("✗ Validation passed (should have failed!)")
-            except Exception as e:
+            except SchemaValidationError as e:
                 print("✓ Validation correctly detected errors:")
                 # Parse the validation error
                 if "validation error" in str(e):
@@ -138,7 +138,7 @@ def example_invalid_config():
     except SchemaValidationError as e:
         print("✓ Validation correctly detected errors:")
         print(f"  {e}")
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"Error: {e}")
 
 
@@ -197,7 +197,7 @@ def example_obscured_password():
         else:
             print("✗ Configuration 'obscured_database' not found")
 
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"✗ Error: {e}")
 
 
@@ -242,7 +242,7 @@ def example_nested_config():
             print(f"  api.rate_limit.requests_per_minute: {rpm}")
         else:
             print("✗ Configuration 'nested_config' not found")
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"✗ Error: {e}")
 
 
@@ -269,6 +269,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         sys.exit(1)
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"\n\nFatal error: {e}")
         sys.exit(1)

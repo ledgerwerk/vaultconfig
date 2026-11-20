@@ -15,6 +15,7 @@ from vaultconfig.exceptions import (
     ConfigNotFoundError,
     EncryptionError,
     FormatError,
+    VaultConfigError,
 )
 from vaultconfig.formats import get_format_handler, supported_formats
 from vaultconfig.schema import ConfigSchema
@@ -104,7 +105,7 @@ def _write_temporary_file(path: Path, data: bytes) -> Path:
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
         return temporary_path
-    except Exception:
+    except OSError:
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
@@ -119,7 +120,7 @@ def _secure_write_file(path: Path, data: bytes) -> None:
     try:
         temporary_path = _write_temporary_file(path, data)
         os.replace(temporary_path, path)
-    except Exception as e:
+    except OSError as e:
         if temporary_path is not None:
             try:
                 temporary_path.unlink()
@@ -298,7 +299,7 @@ class ConfigManager:
             name = config_file.stem
             try:
                 self._load_config(name)
-            except Exception as e:
+            except (OSError, ValueError, VaultConfigError) as e:
                 logger.error(f"Failed to load config '{name}': {e}")
 
     def _load_config(self, name: str) -> None:
@@ -394,13 +395,13 @@ class ConfigManager:
             for target, temporary_path in staged.items():
                 os.replace(temporary_path, target)
                 replaced.append(target)
-        except Exception as exc:
+        except OSError as exc:
             rollback_failed = False
             for target in reversed(replaced):
                 backup = backups.pop(target)
                 try:
                     os.replace(backup, target)
-                except Exception:
+                except OSError:
                     rollback_failed = True
                     preserved_backups.add(backup)
                     logger.exception(
@@ -547,7 +548,7 @@ class ConfigManager:
         }
         try:
             self._write_configs_transactionally(serialized)
-        except Exception as exc:
+        except OSError as exc:
             raise EncryptionError(
                 f"Failed to update encryption password: {exc}"
             ) from exc
@@ -627,7 +628,7 @@ class ConfigManager:
                 with open(config_file, "rb") as f:
                     data = f.read()
                 status[name] = crypt.is_encrypted(data)
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Failed to check encryption for '{name}': {e}")
                 status[name] = False
 

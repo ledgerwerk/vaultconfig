@@ -50,7 +50,7 @@ def load_mapping(text: str, format_name: str) -> dict[str, Any]:
         raise ValueError(f"Unsupported format: {format_name}")
 
     if not isinstance(data, dict):
-        raise ValueError(f"Expected a mapping at root, got {type(data).__name__}")
+        raise TypeError(f"Expected a mapping at root, got {type(data).__name__}")
 
     return data
 
@@ -88,7 +88,7 @@ def load_mapping_file(
         data = load_mapping(content, format_name)
 
     if not isinstance(data, dict):
-        raise ValueError(f"Expected a mapping at root, got {type(data).__name__}")
+        raise TypeError(f"Expected a mapping at root, got {type(data).__name__}")
 
     return data
 

@@ -72,11 +72,11 @@ class TestLoadMapping:
         assert data == {"section": {"a": "1", "b": "hello"}}
 
     def test_load_json_rejects_non_dict_root(self):
-        with pytest.raises(ValueError, match="Expected a mapping"):
+        with pytest.raises(TypeError, match="Expected a mapping"):
             load_mapping("[1, 2, 3]", "json")
 
     def test_load_json_rejects_scalar(self):
-        with pytest.raises(ValueError, match="Expected a mapping"):
+        with pytest.raises(TypeError, match="Expected a mapping"):
             load_mapping('"just a string"', "json")
 
     def test_load_json_parse_error(self):
@@ -189,7 +189,7 @@ class TestLoadMappingFile:
     def test_load_file_rejects_non_dict_root(self, tmp_path):
         f = tmp_path / "list.json"
         f.write_text("[1, 2, 3]")
-        with pytest.raises(ValueError, match="Expected a mapping"):
+        with pytest.raises(TypeError, match="Expected a mapping"):
             load_mapping_file(f)
 
     def test_unsupported_explicit_format_raises(self, tmp_path):

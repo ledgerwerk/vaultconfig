@@ -255,7 +255,7 @@ class Obscurer:
             return plaintext.decode("utf-8")
         except ImportError as e:
             raise ImportError(str(e)) from e
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             raise ValueError(f"Failed to reveal password - is it obscured? {e}") from e
 
     def is_obscured(self, value: str) -> bool:
@@ -277,7 +277,7 @@ class Obscurer:
             revealed = self.reveal(value)
             # If we can reveal it and it's printable, it's likely obscured
             return revealed.isprintable()
-        except Exception:
+        except ValueError:
             return False
 
 

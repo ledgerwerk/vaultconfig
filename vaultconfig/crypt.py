@@ -149,7 +149,7 @@ def encrypt(data: bytes, password: str) -> bytes:
 
         return result.encode("utf-8")
 
-    except Exception as e:
+    except (ImportError, OSError, TypeError, ValueError) as e:
         raise EncryptionError(f"Failed to encrypt config: {e}") from e
 
 
@@ -233,7 +233,7 @@ def decrypt(data: bytes, password: str | None = None) -> bytes:
 
     except (InvalidPasswordError, DecryptionError):
         raise
-    except Exception as e:
+    except (ImportError, OSError, TypeError, ValueError) as e:
         raise DecryptionError(f"Failed to decrypt config: {e}") from e
 
 
@@ -250,7 +250,7 @@ def is_encrypted(data: bytes) -> bool:
         text = data.decode("utf-8", errors="ignore")
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         return len(lines) > 0 and lines[0] == ENCRYPTION_HEADER.rstrip()
-    except Exception:
+    except (AttributeError, TypeError):
         return False
 
 

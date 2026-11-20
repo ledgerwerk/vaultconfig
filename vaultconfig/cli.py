@@ -330,7 +330,7 @@ def create_command(
 
             try:
                 config_data = load_mapping_file(file_path)
-            except Exception as e:
+            except (OSError, TypeError, ValueError, VaultConfigError) as e:
                 console.print(
                     "[red]Error:[/red] Could not detect file format. "
                     "Use .json, .yaml, .toml, or .ini extension"
@@ -662,10 +662,11 @@ def delete_command(
             sys.exit(1)
 
         # Confirm deletion
-        if not yes:
-            if not click.confirm(f"Are you sure you want to delete config '{name}'?"):
-                console.print("[yellow]Cancelled[/yellow]")
-                sys.exit(1)
+        if not yes and not click.confirm(
+            f"Are you sure you want to delete config '{name}'?"
+        ):
+            console.print("[yellow]Cancelled[/yellow]")
+            sys.exit(1)
 
         if manager.remove_config(name):
             console.print(f"[green]✓[/green] Deleted config: {name}")
@@ -942,7 +943,7 @@ def import_command(
     except VaultConfigError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         console.print(f"[red]Error:[/red] Failed to import: {e}")
         sys.exit(1)
 
@@ -1497,13 +1498,12 @@ def encrypt_remove_command(
             sys.exit(1)
 
         # Confirm removal
-        if not yes:
-            if not click.confirm(
-                "Are you sure you want to remove encryption? "
-                "Configs will be stored as plaintext."
-            ):
-                console.print("[yellow]Cancelled[/yellow]")
-                sys.exit(1)
+        if not yes and not click.confirm(
+            "Are you sure you want to remove encryption? "
+            "Configs will be stored as plaintext."
+        ):
+            console.print("[yellow]Cancelled[/yellow]")
+            sys.exit(1)
 
         manager = _get_manager(str(config_path), format)
         manager.remove_encryption()
@@ -1778,7 +1778,7 @@ def validate_command(
             try:
                 config_schema.validate(config._data)
                 console.print(f"[green]✓[/green] Config '{name}' is valid")
-            except Exception as e:
+            except VaultConfigError as e:
                 console.print(f"[red]✗[/red] Validation failed: {e}")
                 sys.exit(1)
         else:
@@ -1871,7 +1871,7 @@ def obscure_generate_key(output: str | None, from_passphrase: bool) -> None:
                 err=True,
             )
 
-    except Exception as e:
+    except (click.Abort, click.ClickException, OSError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 

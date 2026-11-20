@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from vaultconfig.config import ConfigManager
+from vaultconfig.exceptions import VaultConfigError
 
 
 def print_section(title: str) -> None:
@@ -256,7 +257,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
         sys.exit(1)
-    except Exception as e:
+    except (OSError, ValueError, VaultConfigError) as e:
         print(f"\n\nFatal error: {e}")
         import traceback
 
